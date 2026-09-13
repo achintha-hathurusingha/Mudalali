@@ -1,0 +1,192 @@
+import type { Channel } from "../channel/types.js";
+import { config } from "../config.js";
+import { getPendingDraft, resolveDraft, listPendingDrafts } from "../memory/drafts.js";
+import { saveOutbound, findCustomerByPhone, openConversationFor } from "../memory/repo.js";
+import { confirmOrder, cancelOrder, orderReadyToConfirm } from "../memory/orders.js";
+import { phoneOf } from "../util/jid.js";
+import { log } from "../log.js";
+
+/**
+ * The approval loop runs over WhatsApp itself - no dashboard to build,
+ * no second app for the shop owner to remember to open.
+ */
+export function renderDraftForOperator(args: {
+  code: string;
+  customerJid: string;
+  customerName: string | null;
+  incoming: string;
+  intent: string;
+  confidence: number;
+  reason: string | null;
+  draft: string;
+  orderSummary?: string;
+  orderId?: number | null;
+}): string {
+  const who = args.customerName ? `${args.customerName} (${phoneOf(args.customerJid)})` : phoneOf(args.customerJid);
+  const lines = [
+    `[${args.code}] ${who}`,
+    `${args.intent} ${args.confidence.toFixed(2)}${args.reason ? ` - ${args.reason}` : ""}`,
+    "",
+    `> ${args.incoming}`,
+    "",
+    `Draft: ${args.draft}`,
+  ];
+  if (args.orderSummary) lines.push("", args.orderSummary);
+  lines.push("", `ok ${args.code}  |  ${args.code} <your text>  |  skip ${args.code}`);
+  if (args.orderId) lines.push(`ok also confirms order #${args.orderId}`);
+  return lines.join("\n");
+}
+
+/** Something a person has to take over. The customer has already been answered. */
+export function renderHandover(args: {
+  customerJid: string;
+  customerName: string | null;
+  incoming: string;
+  intent: string;
+  reason: string;
+  acknowledged: string | null;
+  orderSummary?: string;
+}): string {
+  const phone = phoneOf(args.customerJid);
+  const who = args.customerName ? `${args.customerName} (${phone})` : phone;
+  const lines = [`>> OVER TO YOU - ${who}`, `${args.intent} - ${args.reason}`, "", `> ${args.incoming}`];
+  if (args.acknowledged) lines.push("", `Already sent: ${args.acknowledged}`);
+  else lines.push("", "Nothing sent to the customer yet.");
+  if (args.orderSummary) lines.push("", args.orderSummary);
+  lines.push("", `Reply through the bot:  msg ${phone} <your text>`);
+  return lines.join("\n");
+}
+
+const HELP = [
+  "Commands:",
+  "  ok <code>            send the draft as written",
+  "  <code> <your text>   send your version instead",
+  "  skip <code>          send nothing",
+  "  pending              list drafts still waiting",
+  "  msg <phone> <text>   message a customer through the bot",
+  "  confirm <order id>   mark a draft order confirmed",
+  "  cancel <order id>    cancel a draft order",
+].join("\n");
+
+/**
+ * Returns true when the message was an operator command (and was handled).
+ */
+export async function handleOperatorCommand(text: string, channel: Channel): Promise<boolean> {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (lower === "help" || lower === "?") {
+    await channel.send(config.operatorJid, HELP);
+    return true;
+  }
+
+  if (lower === "pending") {
+    const pending = await listPendingDrafts();
+    const body = pending.length
+      ? pending.map((d) => `[${d.id}] ${d.intent ?? "?"} - ${d.incoming_body.slice(0, 60)}`).join("\n")
+      : "Nothing waiting.";
+    await channel.send(config.operatorJid, body);
+    return true;
+  }
+
+  const orderMatch = /^(confirm|cancel)\s+#?(\d+)$/i.exec(trimmed);
+  if (orderMatch) {
+    const action = orderMatch[1]!.toLowerCase();
+    const orderId = Number(orderMatch[2]!);
+    if (action === "cancel") {
+      await cancelOrder(orderId);
+      await channel.send(config.operatorJid, `Order #${orderId} cancelled.`);
+      return true;
+    }
+    const missing = await orderReadyToConfirm(orderId);
+    if (missing.length > 0) {
+      await channel.send(config.operatorJid, `Order #${orderId} still needs ${missing.join(", ")}.`);
+      return true;
+    }
+    await confirmOrder(orderId);
+    await channel.send(config.operatorJid, `Order #${orderId} confirmed.`);
+    return true;
+  }
+
+  // msg 94771234567 Hi, your order is on the way
+  const msgMatch = /^msg\s+(\+?\d{7,15})\s+([\s\S]+)$/i.exec(trimmed);
+  if (msgMatch) {
+    const phone = msgMatch[1]!.replace(/\D/g, "");
+    const body = msgMatch[2]!.trim();
+    const customer = await findCustomerByPhone(phone);
+    if (!customer) {
+      await channel.send(config.operatorJid, `No conversation with ${phone}.`);
+      return true;
+    }
+    await channel.send(customer.wa_jid, body);
+    const conversation = await openConversationFor(customer.id);
+    if (conversation) await saveOutbound(conversation.id, body);
+    await channel.send(config.operatorJid, `Sent to ${phone}.`);
+    return true;
+  }
+
+  const okMatch = /^ok\s+([a-z0-9]{4})$/i.exec(trimmed);
+  if (okMatch) {
+    const code = okMatch[1]!;
+    const draft = await getPendingDraft(code);
+    if (!draft) {
+      await channel.send(config.operatorJid, `No pending draft ${code}.`);
+      return true;
+    }
+    await channel.send(draft.customer_jid, draft.draft_reply);
+    await saveOutbound(draft.conversation_id, draft.draft_reply);
+    await resolveDraft(code, "sent");
+
+    // Approving the confirmation reply is what makes the order real - but only
+    // when there is somewhere to ship it to.
+    if (draft.order_id) {
+      const missing = await orderReadyToConfirm(draft.order_id);
+      if (missing.length === 0) {
+        await confirmOrder(draft.order_id);
+        await channel.send(config.operatorJid, `Sent ${code}. Order #${draft.order_id} confirmed.`);
+      } else {
+        await channel.send(
+          config.operatorJid,
+          `Sent ${code}. Order #${draft.order_id} still needs ${missing.join(", ")} - ` +
+            `send "confirm ${draft.order_id}" once you have it.`,
+        );
+      }
+    } else {
+      await channel.send(config.operatorJid, `Sent ${code}.`);
+    }
+    log.info({ code, orderId: draft.order_id }, "operator approved draft");
+    return true;
+  }
+
+  const skipMatch = /^skip\s+([a-z0-9]{4})$/i.exec(trimmed);
+  if (skipMatch) {
+    const code = skipMatch[1]!;
+    const draft = await getPendingDraft(code);
+    if (!draft) {
+      await channel.send(config.operatorJid, `No pending draft ${code}.`);
+      return true;
+    }
+    await resolveDraft(code, "skipped");
+    if (draft.order_id) await cancelOrder(draft.order_id);
+    await channel.send(config.operatorJid, `Skipped ${code}.`);
+    return true;
+  }
+
+  const editMatch = /^([a-z0-9]{4})\s+([\s\S]+)$/i.exec(trimmed);
+  if (editMatch) {
+    const code = editMatch[1]!;
+    const replacement = editMatch[2]!.trim();
+    const draft = await getPendingDraft(code);
+    if (draft) {
+      await channel.send(draft.customer_jid, replacement);
+      await saveOutbound(draft.conversation_id, replacement);
+      await resolveDraft(code, "edited");
+      await channel.send(config.operatorJid, `Sent your version of ${code}.`);
+      log.info({ code }, "operator edited draft");
+      return true;
+    }
+  }
+
+  await channel.send(config.operatorJid, `Not a command. ${HELP}`);
+  return true;
+}

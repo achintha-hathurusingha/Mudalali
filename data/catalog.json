@@ -1,0 +1,42 @@
+[
+  {
+    "id": "TS-001",
+    "name": "Plain Cotton T-Shirt",
+    "nameSi": "සාමාන්‍ය කපු ටී ෂර්ට්",
+    "priceLkr": 1890,
+    "sizes": ["S", "M", "L", "XL", "XXL"],
+    "colours": ["Black", "White", "Navy", "Maroon"],
+    "stock": 40,
+    "active": true
+  },
+  {
+    "id": "TS-002",
+    "name": "Oversized Printed T-Shirt",
+    "nameSi": "ඕවර්සයිස් ප්‍රින්ට් ටී ෂර්ට්",
+    "priceLkr": 2450,
+    "sizes": ["M", "L", "XL"],
+    "colours": ["Black", "Beige"],
+    "stock": 12,
+    "active": true
+  },
+  {
+    "id": "DR-010",
+    "name": "Floral Midi Dress",
+    "nameSi": "ෆ්ලෝරල් මිඩි ඩ්‍රස්",
+    "priceLkr": 4900,
+    "sizes": ["S", "M", "L"],
+    "colours": ["Blue", "Red"],
+    "stock": 6,
+    "active": true
+  },
+  {
+    "id": "DN-020",
+    "name": "Slim Fit Denim",
+    "nameSi": "ස්ලිම් ෆිට් ඩෙනිම්",
+    "priceLkr": 5750,
+    "sizes": ["28", "30", "32", "34", "36"],
+    "colours": ["Blue", "Black"],
+    "stock": 0,
+    "active": true
+  }
+]

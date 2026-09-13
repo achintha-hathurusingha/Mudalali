@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.wa-auth/
+*.log
+
+# Your database provider's CA certificate - specific to your project
+ca.pem
+*.pem
