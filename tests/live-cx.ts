@@ -16,6 +16,8 @@ import type { Product } from "../src/knowledge/catalog.js";
 import type { Understanding } from "../src/understanding/schema.js";
 import { closeDb } from "../src/memory/db.js";
 import { isColomboArea } from "../src/knowledge/business.js";
+import { decide } from "../src/action/policy.js";
+import type { RuntimeSettings } from "../src/memory/settings.js";
 
 const products: Product[] = JSON.parse(readFileSync("./data/catalog.json", "utf8"));
 
@@ -145,6 +147,53 @@ const capturesDetail =
       : `${field} was ${JSON.stringify(got)}, expected to contain "${expected}"`;
   };
 
+/**
+ * The settings the shop actually runs on, so the policy check below measures
+ * production behaviour rather than a hypothetical configuration.
+ */
+const LIVE_SETTINGS: RuntimeSettings = {
+  paused: false,
+  mode: "auto",
+  autoIntents: ["greeting", "availability", "price", "variant", "delivery", "payment", "other"],
+  minConfidence: 0.8,
+  autoReplyMedia: false,
+  autoAckEscalations: true,
+  debounceMs: 3000,
+  historyTurns: 10,
+};
+
+/**
+ * Classification is not the customer's experience - delivery is. A "Hi" read as
+ * place_order sat in the approvals queue for four hours on the live number,
+ * because place_order is not an auto intent. This check asks the real policy
+ * what would actually happen to the reply, which is the only question that
+ * matters to the person holding the phone.
+ */
+const repliesWithoutWaitingForAHuman: Check = (u) => {
+  const decision = decide(u, LIVE_SETTINGS);
+  return decision.action === "auto_reply"
+    ? null
+    : `would not reach the customer: ${decision.action} (${
+        "reason" in decision ? decision.reason : ""
+      }) for intent '${u.intent}'`;
+};
+
+/**
+ * The shop confirms orders, the agent does not - the row is written as a draft
+ * and the owner still has to accept it in the console. A customer told the
+ * order is confirmed stops chasing it and waits for a parcel nobody has packed.
+ *
+ * Scans every turn, not just the last: the claim usually lands the moment the
+ * address arrives, several turns before the conversation ends.
+ */
+const neverClaimsTheOrderIsConfirmed: Check = (_u, all) => {
+  const claim = /(confirm(?:ed)?\s+kala\b|(?:order|ඇණවුම)[^.!?]{0,30}\bconfirmed\b|තහවුරු\s*කළා)/i;
+  const guilty = all.find((r) => claim.test(r.draftReply));
+  return guilty
+    ? `said the order is confirmed while it is still a draft awaiting the owner: "${guilty.draftReply}"`
+    : null;
+};
+
 /** entities.city must land on a value the fee table actually knows. */
 const cityResolvesForPricing: Check = (u) => {
   const city = u.entities.city;
@@ -162,6 +211,7 @@ const scenarios: Scenario[] = [
     why: "the flow that makes money",
     turns: ["hi", "t shirt ekak oney", "plain eka", "L", "black", "ow ewanna"],
     checks: [
+      neverClaimsTheOrderIsConfirmed,
       intentIs("place_order"),
       productIs("TS-001"),
       sizeIs("L"),
@@ -244,6 +294,7 @@ const scenarios: Scenario[] = [
       "Nimal Perera, 45/2 Temple Road, Nugegoda, 0771234567",
     ],
     checks: [
+      neverClaimsTheOrderIsConfirmed,
       pricesAreReal,
       capturesDetail("city", "Nugegoda"),
       capturesContact("customerName", "Nimal"),
@@ -287,6 +338,49 @@ const scenarios: Scenario[] = [
     why: "'colours okkoma' means send them all, so colour must be left null",
     turns: ["plain t shirt eka", "thiyana colors okkoma danna"],
     checks: [sendsPhotos, neverPromisesPhotosLater],
+  },
+  {
+    // Draft 0f5b / a485 on the live number, 13 Sep. Both went unanswered.
+    name: "bare greeting deep in an order conversation",
+    why: "read as place_order on the live number, held for approval, never answered",
+    turns: [
+      "plain t shirt ekak oney",
+      "M",
+      "black",
+      "Nimal, 45 Temple Road, Nugegoda, 0771234567",
+      "Hi",
+    ],
+    checks: [
+      neverClaimsTheOrderIsConfirmed,intentIs("greeting", "other"), repliesWithoutWaitingForAHuman, replyIsShort],
+  },
+  {
+    // Draft 0d36 on the live number, 13 Sep. Also unanswered.
+    name: "thanks after the order details are in",
+    why: "gratitude is not an order; holding it back leaves the chat dead",
+    turns: [
+      "plain t shirt ekak oney M black",
+      "Nimal, 45 Temple Road, Nugegoda, 0771234567",
+      "thank you for your service",
+    ],
+    checks: [
+      neverClaimsTheOrderIsConfirmed,intentIs("greeting", "other"), repliesWithoutWaitingForAHuman, replyIsShort],
+  },
+  {
+    name: "the order itself still waits for a human",
+    why: "the fix above must not open the gate on real order capture",
+    turns: [
+      "plain t shirt ekak oney M black",
+      "Nimal, 45 Temple Road, Nugegoda, 0771234567",
+      "ow ewanna, confirm karanna",
+    ],
+    checks: [
+      neverClaimsTheOrderIsConfirmed,
+      intentIs("place_order"),
+      (u) =>
+        decide(u, LIVE_SETTINGS).action === "auto_reply"
+          ? "an order was captured and sent with no human in the loop"
+          : null,
+    ],
   },
   {
     name: "city spelling: Dehiwela",
