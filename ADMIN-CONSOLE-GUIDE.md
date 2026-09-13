@@ -193,8 +193,13 @@ agent. The `dbhub` skill in `.claude/skills/` teaches the explore-then-query wor
 `npx -y` downloads on first run, which exceeds the 30s health-check timeout — run the package once
 by hand to warm the cache before adding it, or the first `claude mcp list` will show a false failure.
 
-Skipped: `@jpisnice/shadcn-ui-mcp-server` is currently broken on npm (`Cannot find module
-'./serial.js'`). Worth retrying later.
+```bash
+# Components - the official shadcn server, not the broken third-party one
+claude mcp add --transport stdio shadcn -- npx -y shadcn@latest mcp
+```
+
+(`@jpisnice/shadcn-ui-mcp-server`, which most blog posts point at, is currently broken on npm —
+`Cannot find module './serial.js'`. shadcn ships its own now; use that.)
 
 | Connector | What it unlocks |
 |---|---|
@@ -228,6 +233,37 @@ session*, so read before installing:
 4. **"Show me one, then stop."** Review one row before it generates six screens.
 5. **Make it check its own work:** *"Screenshot at 390px and 1440px and tell me what looks wrong
    before I do."*
+
+---
+
+### What to build the UI with
+
+**shadcn/ui.** An admin console is tables, forms, dialogs and toasts, and that is exactly what it
+gives you — with Radix underneath, so keyboard navigation and accessibility are already right. It hit
+~75k stars and is the default for new Next.js + Tailwind projects.
+
+The reason it matters *here specifically*: shadcn **copies components into your repo** rather than
+being a dependency you import. When Claude Code needs to change how a table row behaves, it edits your
+file. With a conventional library it has to work around an API it cannot see, and the usual result is
+a hand-rolled duplicate sitting next to the real component.
+
+Worth naming the alternative honestly: [Ant Design](https://ant.design) is stronger out of the box for
+dense, data-heavy admin screens — 92k stars, dominant in enterprise UI across Asia, better stock
+tables and form handling. The trade is a fixed aesthetic and components you cannot edit. For a
+six-screen console that one person uses, shadcn's editability is worth more than Ant's breadth.
+
+The three pieces that make the UI work actually go well:
+
+| Piece | Why |
+|---|---|
+| **shadcn MCP** (connected) | Claude reads real component source and installs from the registry instead of approximating from memory |
+| **chrome-devtools-mcp** (connected) | Claude looks at what it rendered. Without this you are the render loop |
+| **`frontend-design` skill** | Forces a named aesthetic up front instead of the default AI look |
+
+Add components with the CLI as you need them — `npx shadcn@latest add table dialog form sonner` —
+rather than installing all fifty. And put one line in `CLAUDE.md`: *use shadcn primitives, never
+hand-roll a component that already exists in `components/ui`.* Without it Claude reliably reinvents
+the button.
 
 ---
 
