@@ -6,13 +6,36 @@ import {
   DisconnectReason,
   type WAMessage,
   type WASocket,
+  type proto,
 } from "@whiskeysockets/baileys";
 import type { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
+import QRCode from "qrcode";
 import { config } from "../config.js";
 import { log, silentLogger } from "../log.js";
 import type { Attachment, Channel, MessageHandler } from "./types.js";
 
+/**
+ * Peels off the containers WhatsApp wraps real content in. Without this a photo
+ * sent in a disappearing-messages chat, or as view-once, is never seen at all.
+ */
+function unwrap(message: proto.IMessage | null | undefined): proto.IMessage | null | undefined {
+  let current = message;
+  for (let depth = 0; depth < 4 && current; depth++) {
+    const inner =
+      current.ephemeralMessage?.message ??
+      current.viewOnceMessage?.message ??
+      current.viewOnceMessageV2?.message ??
+      current.viewOnceMessageV2Extension?.message ??
+      current.documentWithCaptionMessage?.message ??
+      current.editedMessage?.message;
+    if (!inner) return current;
+    current = inner;
+  }
+  return current;
+}
+
+const QR_IMAGE = "./wa-login-qr.png";
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
 const MAX_CONSECUTIVE_FAILURES = 10;
 
@@ -25,6 +48,9 @@ export class BaileysChannel implements Channel {
   private socket: WASocket | null = null;
   private stopping = false;
   private failures = 0;
+  private connected = false;
+  private stableTimer: NodeJS.Timeout | null = null;
+  private readonly recentOpens: number[] = [];
   /** Ids of messages this process sent, so they are not read back as human replies. */
   private readonly ownSends = new Set<string>();
 
@@ -45,14 +71,32 @@ export class BaileysChannel implements Channel {
     socket.ev.on("connection.update", (update) => {
       const { connection, lastDisconnect, qr } = update;
       if (qr) {
-        log.info("Scan this QR in WhatsApp > Linked devices");
+        log.info("Scan this QR in WhatsApp > Settings > Linked devices");
         qrcode.generate(qr, { small: true });
+        // Terminal block characters are often unscannable; a PNG always works.
+        void QRCode.toFile(QR_IMAGE, qr, { width: 512, margin: 2 })
+          .then(() => log.info({ file: QR_IMAGE }, "QR also written as an image - open it and scan"))
+          .catch((err) => log.warn({ err }, "could not write the QR image"));
       }
       if (connection === "open") {
-        this.failures = 0;
+        this.connected = true;
+        // Only a connection that actually survives counts as recovery. Resetting
+        // on every open lets a connect/close flap run forever.
+        this.stableTimer = setTimeout(() => {
+          this.failures = 0;
+          this.recentOpens.length = 0;
+        }, 30_000);
+        this.recentOpens.push(Date.now());
         log.info({ me: socket.user?.id, lid: socket.user?.lid }, "WhatsApp connected");
+        // WhatsApp now delivers most chats under @lid identifiers that are not
+        // derived from the phone number. Learn the operator's LID so their
+        // commands are recognised whichever form they arrive in.
+        void this.learnOperatorLids(socket);
       }
       if (connection === "close") {
+        this.connected = false;
+        if (this.stableTimer) clearTimeout(this.stableTimer);
+        this.stableTimer = null;
         const status = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
         const loggedOut = status === DisconnectReason.loggedOut;
         log.warn({ status, loggedOut }, "WhatsApp connection closed");
@@ -76,20 +120,31 @@ export class BaileysChannel implements Channel {
           continue;
         }
 
+        // WhatsApp wraps content in containers - disappearing messages,
+        // view-once, captioned documents. Reading only the top level makes
+        // photos vanish with no log at all.
+        const content = unwrap(message.message);
+
         const text =
-          message.message?.conversation ??
-          message.message?.extendedTextMessage?.text ??
-          message.message?.imageMessage?.caption ??
-          message.message?.videoMessage?.caption ??
+          content?.conversation ??
+          content?.extendedTextMessage?.text ??
+          content?.imageMessage?.caption ??
+          content?.videoMessage?.caption ??
           "";
 
         // A photo with no caption, or a voice note, is still a message.
-        const media = await this.downloadMedia(message, socket);
-        if (!text.trim() && media.length === 0) continue;
+        const media = await this.downloadMedia(message, content, socket);
+        if (!text.trim() && media.length === 0) {
+          // Never skip silently: an unrecognised type is how media disappears.
+          const kinds = Object.keys(content ?? {}).filter((k) => k !== "messageContextInfo");
+          if (kinds.length) log.warn({ jid, kinds }, "message type not handled");
+          continue;
+        }
 
         try {
           await onMessage({
             jid,
+            phone: await this.phoneFor(jid, socket),
             text: text.trim(),
             media,
             pushName: message.pushName ?? undefined,
@@ -103,14 +158,54 @@ export class BaileysChannel implements Channel {
     });
   }
 
+  /** The operator's phone JID plus whatever LID WhatsApp uses for them. */
+  private async learnOperatorLids(socket: WASocket): Promise<void> {
+    for (const jid of config.operatorJids) {
+      if (jid.endsWith("@lid")) continue;
+      try {
+        const lid = await socket.signalRepository.lidMapping.getLIDForPN(jid);
+        if (lid && !this.operatorLids.has(lid)) {
+          this.operatorLids.add(lid);
+          log.info({ jid, lid }, "learned the operator's LID");
+        }
+      } catch (error) {
+        log.debug({ err: error, jid }, "could not resolve a LID for the operator");
+      }
+    }
+    // The bot's own account is the operator in a single-number setup.
+    if (socket.user?.lid) this.operatorLids.add(socket.user.lid);
+  }
+
+  /** Extra operator identities discovered at runtime. */
+  private readonly operatorLids = new Set<string>();
+
+  operatorIdentities(): string[] {
+    return [...config.operatorJids, ...this.operatorLids];
+  }
+
+  /** A LID is not a phone number; look up the real one so `msg <phone>` works. */
+  private async phoneFor(jid: string, socket: WASocket): Promise<string | undefined> {
+    if (!jid.endsWith("@lid")) return jid.split("@")[0]?.split(":")[0];
+    try {
+      const pn = await socket.signalRepository.lidMapping.getPNForLID(jid);
+      return pn ? (pn.split("@")[0]?.split(":")[0] ?? undefined) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /**
    * Photos and voice notes arrive encrypted and have to be fetched. A failure
    * here returns nothing rather than throwing - the pipeline then hands the
    * customer to a human instead of losing them.
    */
-  private async downloadMedia(message: WAMessage, socket: WASocket): Promise<Attachment[]> {
-    const image = message.message?.imageMessage;
-    const audio = message.message?.audioMessage;
+  private async downloadMedia(
+    message: WAMessage,
+    content: proto.IMessage | null | undefined,
+    socket: WASocket,
+  ): Promise<Attachment[]> {
+    const image = content?.imageMessage;
+    const audio = content?.audioMessage;
     if (!image && !audio) return [];
 
     const kind = image ? ("image" as const) : ("audio" as const);
@@ -123,7 +218,8 @@ export class BaileysChannel implements Channel {
     }
 
     try {
-      const data = (await downloadMediaMessage(message, "buffer", {}, {
+      const unwrapped: WAMessage = { ...message, message: content };
+      const data = (await downloadMediaMessage(unwrapped, "buffer", {}, {
         logger: silentLogger,
         reuploadRequest: socket.updateMediaMessage,
       })) as Buffer;
@@ -145,6 +241,17 @@ export class BaileysChannel implements Channel {
 
   /** Exponential backoff: hammering the connection is how a number gets flagged. */
   private reconnect(onMessage: MessageHandler): void {
+    // Repeatedly connecting then being dropped means something else holds the
+    // session. Reconnecting harder only makes it worse.
+    const recent = this.recentOpens.filter((t) => Date.now() - t < 60_000);
+    if (recent.length >= 5) {
+      log.error(
+        { opensInLastMinute: recent.length },
+        "connection keeps being replaced - another instance is probably running. Stopping.",
+      );
+      this.stopping = true;
+      return;
+    }
     this.failures++;
     if (this.failures > MAX_CONSECUTIVE_FAILURES) {
       log.error({ failures: this.failures }, "giving up reconnecting - restart the process");
@@ -157,10 +264,33 @@ export class BaileysChannel implements Channel {
     }, delay);
   }
 
+  /**
+   * Reconnects take a few seconds, and an approval typed during one would
+   * otherwise fail with "Connection Closed" and lose the reply. Wait for the
+   * socket to come back rather than throwing immediately.
+   */
+  private async waitForConnection(timeoutMs = 20_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (!this.connected && !this.stopping && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    return this.connected;
+  }
+
   async send(jid: string, text: string): Promise<void> {
     if (!this.socket) throw new Error("Channel not started");
-    const sent = await this.socket.sendMessage(jid, { text });
-    if (sent?.key.id) this.ownSends.add(sent.key.id);
+    if (!this.connected && !(await this.waitForConnection())) {
+      throw new Error("WhatsApp is not connected - the message was not sent");
+    }
+    try {
+      const sent = await this.socket!.sendMessage(jid, { text });
+      if (sent?.key.id) this.ownSends.add(sent.key.id);
+    } catch (error) {
+      // A send that raced a reconnect is worth exactly one retry.
+      if (!(await this.waitForConnection())) throw error;
+      const sent = await this.socket!.sendMessage(jid, { text });
+      if (sent?.key.id) this.ownSends.add(sent.key.id);
+    }
   }
 
   async stop(): Promise<void> {

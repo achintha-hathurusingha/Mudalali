@@ -13,6 +13,7 @@ import { log } from "../log.js";
 export function renderDraftForOperator(args: {
   code: string;
   customerJid: string;
+  customerPhone?: string | null;
   customerName: string | null;
   incoming: string;
   intent: string;
@@ -22,7 +23,9 @@ export function renderDraftForOperator(args: {
   orderSummary?: string;
   orderId?: number | null;
 }): string {
-  const who = args.customerName ? `${args.customerName} (${phoneOf(args.customerJid)})` : phoneOf(args.customerJid);
+  // A @lid is an opaque id, so show the real number when we have it.
+  const shown = args.customerPhone ?? phoneOf(args.customerJid);
+  const who = args.customerName ? `${args.customerName} (${shown})` : shown;
   const lines = [
     `[${args.code}] ${who}`,
     `${args.intent} ${args.confidence.toFixed(2)}${args.reason ? ` - ${args.reason}` : ""}`,
@@ -40,6 +43,7 @@ export function renderDraftForOperator(args: {
 /** Something a person has to take over. The customer has already been answered. */
 export function renderHandover(args: {
   customerJid: string;
+  customerPhone?: string | null;
   customerName: string | null;
   incoming: string;
   intent: string;
@@ -47,7 +51,7 @@ export function renderHandover(args: {
   acknowledged: string | null;
   orderSummary?: string;
 }): string {
-  const phone = phoneOf(args.customerJid);
+  const phone = args.customerPhone ?? phoneOf(args.customerJid);
   const who = args.customerName ? `${args.customerName} (${phone})` : phone;
   const lines = [`>> OVER TO YOU - ${who}`, `${args.intent} - ${args.reason}`, "", `> ${args.incoming}`];
   if (args.acknowledged) lines.push("", `Already sent: ${args.acknowledged}`);
@@ -133,7 +137,17 @@ export async function handleOperatorCommand(text: string, channel: Channel): Pro
       await channel.send(config.operatorJid, `No pending draft ${code}.`);
       return true;
     }
-    await channel.send(draft.customer_jid, draft.draft_reply);
+    try {
+      await channel.send(draft.customer_jid, draft.draft_reply);
+    } catch (error) {
+      // Leave the draft pending so it can simply be approved again.
+      log.error({ err: error, code }, "could not send an approved draft");
+      await channel.send(
+        config.operatorJid,
+        `Could not send ${code}: ${(error as Error).message}. It is still pending - try "ok ${code}" again.`,
+      );
+      return true;
+    }
     await saveOutbound(draft.conversation_id, draft.draft_reply);
     await resolveDraft(code, "sent");
 

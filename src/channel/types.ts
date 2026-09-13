@@ -13,6 +13,8 @@ export type InboundMessage = {
   /** WhatsApp JID, e.g. 94771234567@s.whatsapp.net (or ...@lid on Baileys 7) */
   jid: string;
   text: string;
+  /** Real phone digits, resolved from a @lid where possible. */
+  phone?: string;
   pushName?: string;
   waMessageId?: string;
   /** Photos and voice notes. Empty or absent for a plain text message. */
@@ -37,4 +39,9 @@ export interface Channel {
   start(onMessage: MessageHandler): Promise<void>;
   send(jid: string, text: string): Promise<void>;
   stop(): Promise<void>;
+  /**
+   * Every identity that counts as the operator, including any @lid the channel
+   * resolved after connecting. Falls back to config when not implemented.
+   */
+  operatorIdentities?(): string[];
 }

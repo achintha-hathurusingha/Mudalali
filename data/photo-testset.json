@@ -1,0 +1,162 @@
+[
+  {
+    "file": "01-ts001-black-flatlay.jpg",
+    "prompt": "A plain black cotton crew-neck t-shirt laid flat on a white surface, shot from directly above. Clean e-commerce product photo, soft even lighting, no print or logo.",
+    "expectProductId": "TS-001",
+    "expectColour": "Black",
+    "condition": "clean product shot",
+    "shouldEscalate": false
+  },
+  {
+    "file": "02-ts001-black-worn.jpg",
+    "prompt": "A young Sri Lankan man wearing a plain black cotton crew-neck t-shirt, photographed from the chest up in daylight. Casual phone snapshot, no print on the shirt.",
+    "expectProductId": "TS-001",
+    "expectColour": "Black",
+    "condition": "worn by a person",
+    "shouldEscalate": false
+  },
+  {
+    "file": "03-ts001-white-hanger.jpg",
+    "prompt": "A plain white cotton crew-neck t-shirt on a wooden hanger against a pale wall. No print or logo. Natural indoor light.",
+    "expectProductId": "TS-001",
+    "expectColour": "White",
+    "condition": "on a hanger",
+    "shouldEscalate": false
+  },
+  {
+    "file": "04-ts001-white-crumpled.jpg",
+    "prompt": "A plain white cotton t-shirt crumpled on a bed, photographed casually with a phone in dim evening light. Slightly blurry, no print.",
+    "expectProductId": "TS-001",
+    "expectColour": "White",
+    "condition": "crumpled, dim light",
+    "shouldEscalate": false
+  },
+  {
+    "file": "05-ts001-navy-flatlay.jpg",
+    "prompt": "A plain navy blue cotton crew-neck t-shirt laid flat on a light grey surface, shot from above. No print or logo.",
+    "expectProductId": "TS-001",
+    "expectColour": "Navy",
+    "condition": "clean product shot",
+    "shouldEscalate": false
+  },
+  {
+    "file": "06-ts001-maroon-held.jpg",
+    "prompt": "Two hands holding up a plain maroon dark red cotton crew-neck t-shirt to show the front. Indoor light, plain background, no print.",
+    "expectProductId": "TS-001",
+    "expectColour": "Maroon",
+    "condition": "held up",
+    "shouldEscalate": false
+  },
+  {
+    "file": "07-ts001-navy-angled.jpg",
+    "prompt": "A plain navy blue t-shirt photographed at an awkward angle on a tiled floor under yellow indoor lighting, like a quick phone snapshot. No print.",
+    "expectProductId": "TS-001",
+    "expectColour": "Navy",
+    "condition": "awkward angle, yellow light",
+    "shouldEscalate": false
+  },
+  {
+    "file": "08-ts002-black-print-flatlay.jpg",
+    "prompt": "An oversized black t-shirt with a large bold graphic print across the chest, laid flat on a white surface and shot from above. Baggy oversized cut.",
+    "expectProductId": "TS-002",
+    "expectColour": "Black",
+    "condition": "printed, clean shot",
+    "shouldEscalate": false
+  },
+  {
+    "file": "09-ts002-black-print-worn.jpg",
+    "prompt": "A young person wearing a baggy oversized black t-shirt with a large graphic print on the front, standing outdoors. Streetwear style, casual photo.",
+    "expectProductId": "TS-002",
+    "expectColour": "Black",
+    "condition": "printed, worn",
+    "shouldEscalate": false
+  },
+  {
+    "file": "10-ts002-beige-print-hanging.jpg",
+    "prompt": "An oversized beige cream coloured t-shirt with a printed graphic design, hanging on a clothing rack in a shop. Natural light.",
+    "expectProductId": "TS-002",
+    "expectColour": "Beige",
+    "condition": "printed, hanging",
+    "shouldEscalate": false
+  },
+  {
+    "file": "11-dr010-blue-hanger.jpg",
+    "prompt": "A blue floral patterned midi dress on a hanger against a plain wall. Knee to mid-calf length, light summer fabric.",
+    "expectProductId": "DR-010",
+    "expectColour": "Blue",
+    "condition": "on a hanger",
+    "shouldEscalate": false
+  },
+  {
+    "file": "12-dr010-red-worn.jpg",
+    "prompt": "A woman wearing a red floral patterned midi dress, standing outdoors in daylight, full length view.",
+    "expectProductId": "DR-010",
+    "expectColour": "Red",
+    "condition": "worn",
+    "shouldEscalate": false
+  },
+  {
+    "file": "13-dn020-blue-flatlay.jpg",
+    "prompt": "A pair of blue slim fit denim jeans laid flat on a white surface, shot from above. Clean product photo.",
+    "expectProductId": "DN-020",
+    "expectColour": "Blue",
+    "condition": "OUT OF STOCK item",
+    "shouldEscalate": false
+  },
+  {
+    "file": "14-dn020-black-folded.jpg",
+    "prompt": "A pair of black slim fit denim jeans neatly folded on a wooden table, indoor light.",
+    "expectProductId": "DN-020",
+    "expectColour": "Black",
+    "condition": "OUT OF STOCK item",
+    "shouldEscalate": false
+  },
+  {
+    "file": "15-negative-shoes.jpg",
+    "prompt": "A pair of blue running shoes on a white background, shot from above. Product photo.",
+    "expectProductId": null,
+    "expectColour": null,
+    "condition": "not in catalog",
+    "shouldEscalate": true
+  },
+  {
+    "file": "16-negative-hoodie.jpg",
+    "prompt": "A grey pullover hoodie sweatshirt with a front pocket and drawstrings, laid flat on a white surface.",
+    "expectProductId": null,
+    "expectColour": null,
+    "condition": "not in catalog",
+    "shouldEscalate": true
+  },
+  {
+    "file": "17-negative-cap.jpg",
+    "prompt": "A black baseball cap on a plain white background, side view. Product photo.",
+    "expectProductId": null,
+    "expectColour": null,
+    "condition": "not in catalog",
+    "shouldEscalate": true
+  },
+  {
+    "file": "18-negative-watch.jpg",
+    "prompt": "A silver wristwatch with a leather strap on a white background, shot from above.",
+    "expectProductId": null,
+    "expectColour": null,
+    "condition": "not in catalog",
+    "shouldEscalate": true
+  },
+  {
+    "file": "19-negative-handbag.jpg",
+    "prompt": "A brown leather handbag with a shoulder strap, standing on a white background.",
+    "expectProductId": null,
+    "expectColour": null,
+    "condition": "not in catalog",
+    "shouldEscalate": true
+  },
+  {
+    "file": "20-negative-saree.jpg",
+    "prompt": "A colourful traditional Sri Lankan saree draped on a mannequin, richly patterned silk fabric, indoor light.",
+    "expectProductId": null,
+    "expectColour": null,
+    "condition": "not in catalog",
+    "shouldEscalate": true
+  }
+]

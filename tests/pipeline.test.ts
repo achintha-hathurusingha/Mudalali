@@ -1,3 +1,5 @@
+// Pin the config the suite assumes - must come before anything that reads it.
+import "./env.js";
 import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { useTestDb, FakeChannel, StubUnderstander, draftCode } from "./helpers.js";
@@ -533,5 +535,25 @@ describe("photos and voice notes", () => {
     assert.equal(channel.to(OPERATOR).length, 1);
     // However the draft got here, you must be able to see it came from a photo.
     assert.match(channel.to(OPERATOR)[0]!.text, /photo/);
+  });
+});
+
+describe("single-number setup", () => {
+  test("an approval typed in the message-yourself chat is treated as a command", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({ draftReply: "Ow thiyenawa!" }));
+
+    await send({ jid: CUSTOMER, text: "thiyanawada?", waMessageId: "S1" });
+    const code = draftCode(channel.to(OPERATOR)[0]!.text);
+    channel.clear();
+
+    // Bot and operator on one account: the command comes back as fromMe.
+    await send({ jid: OPERATOR, text: `ok ${code}`, fromMe: true, waMessageId: "S2" });
+
+    assert.deepEqual(
+      channel.to(CUSTOMER).map((s) => s.text),
+      ["Ow thiyenawa!"],
+      "otherwise commands are silently ignored when there is only one number",
+    );
   });
 });

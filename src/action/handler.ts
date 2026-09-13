@@ -28,6 +28,7 @@ type Pending = {
   media: Attachment[];
   waMessageIds: string[];
   pushName?: string;
+  phone?: string;
   timer: NodeJS.Timeout;
   settled: Promise<void>;
   resolve: () => void;
@@ -40,11 +41,21 @@ type Pending = {
 export function createPipeline(channel: Channel, understander: Understander): Pipeline {
   const pending = new Map<string, Pending>();
 
+  /** Config plus whatever LIDs the channel resolved after connecting. */
+  function operatorIds(): string[] {
+    return channel.operatorIdentities?.() ?? config.operatorJids;
+  }
+
   async function handle(inbound: InboundMessage): Promise<void> {
     // Replies the shop owner typed on their own phone. Record them so the model
     // does not later contradict a human who has already answered.
     if (inbound.fromMe) {
-      if (isOperator(inbound.jid, config.operatorJids)) return;
+      // Single-number setup: the bot runs on the same account the drafts go to,
+      // so approvals arrive in WhatsApp's "message yourself" chat as fromMe.
+      if (isOperator(inbound.jid, operatorIds())) {
+        await handleOperatorCommand(inbound.text, channel);
+        return;
+      }
       const { conversation } = await getOrCreateConversation(inbound.jid, inbound.pushName);
       await saveOutbound(conversation.id, inbound.text, inbound.waMessageId);
       log.info({ jid: inbound.jid }, "recorded a manual reply from the shop");
@@ -53,7 +64,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
 
     // The operator talks to the bot on the same channel; their messages are
     // commands and must never wait in the debounce buffer.
-    if (isOperator(inbound.jid, config.operatorJids)) {
+    if (isOperator(inbound.jid, operatorIds())) {
       await handleOperatorCommand(inbound.text, channel);
       return;
     }
@@ -65,6 +76,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
         inbound.media ?? [],
         inbound.waMessageId ? [inbound.waMessageId] : [],
         inbound.pushName,
+        inbound.phone,
       );
       return;
     }
@@ -77,6 +89,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
       if (inbound.media?.length) existing.media.push(...inbound.media);
       if (inbound.waMessageId) existing.waMessageIds.push(inbound.waMessageId);
       existing.pushName ??= inbound.pushName;
+      existing.phone ??= inbound.phone;
       existing.timer = setTimeout(() => void fire(inbound.jid), config.debounceMs);
       return;
     }
@@ -88,6 +101,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
       media: inbound.media ?? [],
       waMessageIds: inbound.waMessageId ? [inbound.waMessageId] : [],
       pushName: inbound.pushName,
+      phone: inbound.phone,
       timer: setTimeout(() => void fire(inbound.jid), config.debounceMs),
       settled,
       resolve,
@@ -100,7 +114,14 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
     pending.delete(jid);
     clearTimeout(buffered.timer);
     try {
-      await process(jid, buffered.texts, buffered.media, buffered.waMessageIds, buffered.pushName);
+      await process(
+        jid,
+        buffered.texts,
+        buffered.media,
+        buffered.waMessageIds,
+        buffered.pushName,
+        buffered.phone,
+      );
     } finally {
       buffered.resolve();
     }
@@ -121,6 +142,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
     media: Attachment[],
     waMessageIds: string[],
     pushName?: string,
+    phone?: string,
   ): Promise<void> {
     const text = texts.join("\n").trim();
     if (!text && media.length === 0) return;
@@ -128,7 +150,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
     // Anything we cannot read must reach a person, never vanish.
     const blocked = mediaProblem(media, understander.capabilities);
     if (blocked) {
-      const { conversation } = await getOrCreateConversation(jid, pushName);
+      const { conversation } = await getOrCreateConversation(jid, pushName, phone);
       await recordInbound({
         conversationId: conversation.id,
         body: text || `[${media[0]?.kind ?? "media"}]`,
@@ -149,7 +171,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
       return;
     }
 
-    const { customer, conversation } = await getOrCreateConversation(jid, pushName);
+    const { customer, conversation } = await getOrCreateConversation(jid, pushName, phone);
 
     // Written before the model runs: a crash mid-call must not lose a customer,
     // and a WhatsApp redelivery must not be answered twice.
@@ -249,6 +271,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
         renderDraftForOperator({
           code: held.id,
           customerJid: jid,
+          customerPhone: customer.phone,
           customerName: customer.name,
           incoming: storedBody ?? text,
           intent: u.intent,
@@ -273,6 +296,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
         config.operatorJid,
         renderHandover({
           customerJid: jid,
+          customerPhone: customer.phone,
           customerName: customer.name,
           incoming: storedBody ?? text,
           intent: u.intent,
@@ -299,6 +323,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
       renderDraftForOperator({
         code: draft.id,
         customerJid: jid,
+        customerPhone: customer.phone,
         customerName: customer.name,
         incoming: storedBody ?? text,
         intent: u.intent,

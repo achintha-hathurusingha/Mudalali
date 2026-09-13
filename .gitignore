@@ -7,3 +7,7 @@ dist/
 # Your database provider's CA certificate - specific to your project
 ca.pem
 *.pem
+
+# Pairing QR - a live credential while it is valid
+wa-login-qr.png
+operator-commands.txt

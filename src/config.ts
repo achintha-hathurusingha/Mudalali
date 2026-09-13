@@ -81,4 +81,10 @@ export const config = {
    * auto-replies until you have watched it work. Applies even in auto mode.
    */
   autoReplyMedia: bool("AUTO_REPLY_MEDIA", false),
+
+  /**
+   * Run the operator side in the terminal instead of over WhatsApp. Frees a
+   * phone for testing, and stops the bot messaging its own number.
+   */
+  operatorConsole: bool("OPERATOR_CONSOLE", false),
 } as const;

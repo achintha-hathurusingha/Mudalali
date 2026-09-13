@@ -7,6 +7,7 @@ import type { Turn } from "../understanding/types.js";
 export type Customer = {
   id: number;
   wa_jid: string;
+  phone: string | null;
   name: string | null;
   city: string | null;
 };
@@ -16,13 +17,17 @@ export type Conversation = { id: number; customer_id: number; status: string };
 export async function getOrCreateConversation(
   waJid: string,
   pushName?: string,
+  resolvedPhone?: string,
 ): Promise<{ customer: Customer; conversation: Conversation }> {
-  const phone = waJid.split("@")[0] ?? null;
+  // A @lid is an opaque identifier, not a phone number - storing its digits as
+  // a phone would break `msg <phone>` and show nonsense in the draft header.
+  const phone = resolvedPhone ?? (waJid.endsWith("@lid") ? null : (waJid.split("@")[0] ?? null));
 
   const customer = (await one<Customer>(
     `insert into customers (wa_jid, phone, name) values ($1, $2, $3)
-       on conflict (wa_jid) do update set name = coalesce(customers.name, excluded.name)
-       returning id, wa_jid, name, city`,
+       on conflict (wa_jid) do update set name = coalesce(customers.name, excluded.name),
+                                          phone = coalesce(customers.phone, excluded.phone)
+       returning id, wa_jid, phone, name, city`,
     [waJid, phone, pushName ?? null],
   ))!;
 
@@ -159,7 +164,7 @@ export async function rememberCustomerDetails(
 
 export async function findCustomerByPhone(phone: string): Promise<Customer | null> {
   return one<Customer>(
-    `select id, wa_jid, name, city from customers where phone = $1 or wa_jid like $2 limit 1`,
+    `select id, wa_jid, phone, name, city from customers where phone = $1 or wa_jid like $2 limit 1`,
     [phone, `${phone}@%`],
   );
 }
