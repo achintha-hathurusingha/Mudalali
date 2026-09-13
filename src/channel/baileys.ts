@@ -2,14 +2,16 @@ import {
   makeWASocket,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
   DisconnectReason,
+  type WAMessage,
   type WASocket,
 } from "@whiskeysockets/baileys";
 import type { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
 import { config } from "../config.js";
 import { log, silentLogger } from "../log.js";
-import type { Channel, MessageHandler } from "./types.js";
+import type { Attachment, Channel, MessageHandler } from "./types.js";
 
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
 const MAX_CONSECUTIVE_FAILURES = 10;
@@ -80,12 +82,16 @@ export class BaileysChannel implements Channel {
           message.message?.imageMessage?.caption ??
           message.message?.videoMessage?.caption ??
           "";
-        if (!text.trim()) continue;
+
+        // A photo with no caption, or a voice note, is still a message.
+        const media = await this.downloadMedia(message, socket);
+        if (!text.trim() && media.length === 0) continue;
 
         try {
           await onMessage({
             jid,
             text: text.trim(),
+            media,
             pushName: message.pushName ?? undefined,
             waMessageId: id,
             fromMe: Boolean(message.key.fromMe),
@@ -95,6 +101,46 @@ export class BaileysChannel implements Channel {
         }
       }
     });
+  }
+
+  /**
+   * Photos and voice notes arrive encrypted and have to be fetched. A failure
+   * here returns nothing rather than throwing - the pipeline then hands the
+   * customer to a human instead of losing them.
+   */
+  private async downloadMedia(message: WAMessage, socket: WASocket): Promise<Attachment[]> {
+    const image = message.message?.imageMessage;
+    const audio = message.message?.audioMessage;
+    if (!image && !audio) return [];
+
+    const kind = image ? ("image" as const) : ("audio" as const);
+    const mimeType = (image?.mimetype ?? audio?.mimetype ?? "").split(";")[0] || "";
+    const declaredSize = Number(image?.fileLength ?? audio?.fileLength ?? 0);
+
+    if (declaredSize > config.maxMediaBytes) {
+      log.warn({ kind, declaredSize }, "media larger than the cap, not downloading");
+      return [{ kind, mimeType, data: Buffer.alloc(config.maxMediaBytes + 1) }];
+    }
+
+    try {
+      const data = (await downloadMediaMessage(message, "buffer", {}, {
+        logger: silentLogger,
+        reuploadRequest: socket.updateMediaMessage,
+      })) as Buffer;
+      log.info({ kind, bytes: data.length, mimeType }, "media downloaded");
+      return [
+        {
+          kind,
+          mimeType,
+          data,
+          isVoiceNote: Boolean(audio?.ptt),
+          seconds: audio?.seconds ?? undefined,
+        },
+      ];
+    } catch (error) {
+      log.error({ err: error, kind }, "media download failed");
+      return [];
+    }
   }
 
   /** Exponential backoff: hammering the connection is how a number gets flagged. */

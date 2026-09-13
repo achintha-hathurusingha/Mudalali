@@ -90,12 +90,16 @@ export async function annotateInbound(args: {
   understanding: Understanding;
   model: string;
   latencyMs: number;
+  mediaKind?: "image" | "audio" | null;
+  /** Replaces the stored body when a photo or voice note became text. */
+  body?: string;
 }): Promise<void> {
   const u = args.understanding;
   await query(
     `update messages set intent = $1, confidence = $2, entities = $3,
-            needs_human = $4, language = $5, model = $6, latency_ms = $7
-      where id = $8`,
+            needs_human = $4, language = $5, model = $6, latency_ms = $7,
+            media_kind = $8, body = coalesce($9, body)
+      where id = $10`,
     [
       u.intent,
       u.confidence,
@@ -104,6 +108,8 @@ export async function annotateInbound(args: {
       u.language,
       args.model,
       args.latencyMs,
+      args.mediaKind ?? null,
+      args.body ?? null,
       args.messageId,
     ],
   );

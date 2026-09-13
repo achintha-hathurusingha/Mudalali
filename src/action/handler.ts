@@ -1,6 +1,6 @@
 import { config } from "../config.js";
 import { log } from "../log.js";
-import type { Channel, InboundMessage } from "../channel/types.js";
+import type { Attachment, Channel, InboundMessage } from "../channel/types.js";
 import type { Understander } from "../understanding/types.js";
 import { loadCatalog } from "../knowledge/catalog.js";
 import { isOperator } from "../util/jid.js";
@@ -25,6 +25,7 @@ export type Pipeline = {
 
 type Pending = {
   texts: string[];
+  media: Attachment[];
   waMessageIds: string[];
   pushName?: string;
   timer: NodeJS.Timeout;
@@ -58,7 +59,13 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
     }
 
     if (config.debounceMs <= 0) {
-      await process(inbound.jid, [inbound.text], inbound.waMessageId ? [inbound.waMessageId] : [], inbound.pushName);
+      await process(
+        inbound.jid,
+        [inbound.text],
+        inbound.media ?? [],
+        inbound.waMessageId ? [inbound.waMessageId] : [],
+        inbound.pushName,
+      );
       return;
     }
 
@@ -66,7 +73,8 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
     const existing = pending.get(inbound.jid);
     if (existing) {
       clearTimeout(existing.timer);
-      existing.texts.push(inbound.text);
+      if (inbound.text) existing.texts.push(inbound.text);
+      if (inbound.media?.length) existing.media.push(...inbound.media);
       if (inbound.waMessageId) existing.waMessageIds.push(inbound.waMessageId);
       existing.pushName ??= inbound.pushName;
       existing.timer = setTimeout(() => void fire(inbound.jid), config.debounceMs);
@@ -76,7 +84,8 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
     let resolve!: () => void;
     const settled = new Promise<void>((r) => (resolve = r));
     pending.set(inbound.jid, {
-      texts: [inbound.text],
+      texts: inbound.text ? [inbound.text] : [],
+      media: inbound.media ?? [],
       waMessageIds: inbound.waMessageId ? [inbound.waMessageId] : [],
       pushName: inbound.pushName,
       timer: setTimeout(() => void fire(inbound.jid), config.debounceMs),
@@ -91,7 +100,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
     pending.delete(jid);
     clearTimeout(buffered.timer);
     try {
-      await process(jid, buffered.texts, buffered.waMessageIds, buffered.pushName);
+      await process(jid, buffered.texts, buffered.media, buffered.waMessageIds, buffered.pushName);
     } finally {
       buffered.resolve();
     }
@@ -109,19 +118,46 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
   async function process(
     jid: string,
     texts: string[],
+    media: Attachment[],
     waMessageIds: string[],
     pushName?: string,
   ): Promise<void> {
     const text = texts.join("\n").trim();
-    if (!text) return;
+    if (!text && media.length === 0) return;
+
+    // Anything we cannot read must reach a person, never vanish.
+    const blocked = mediaProblem(media, understander.capabilities);
+    if (blocked) {
+      const { conversation } = await getOrCreateConversation(jid, pushName);
+      await recordInbound({
+        conversationId: conversation.id,
+        body: text || `[${media[0]?.kind ?? "media"}]`,
+        waMessageId: waMessageIds[0],
+      });
+      log.warn({ jid, blocked }, "media could not be read");
+      await channel.send(
+        config.operatorJid,
+        [
+          `>> OVER TO YOU - ${jid.split("@")[0]}`,
+          `${blocked} - open WhatsApp and look at it yourself.`,
+          text ? `\n> ${text}` : "",
+          `\nReply through the bot:  msg ${jid.split("@")[0]} <your text>`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+      return;
+    }
 
     const { customer, conversation } = await getOrCreateConversation(jid, pushName);
 
     // Written before the model runs: a crash mid-call must not lose a customer,
     // and a WhatsApp redelivery must not be answered twice.
+    const mediaKind = media[0]?.kind ?? null;
+    const placeholder = mediaKind === "audio" ? "[voice note]" : mediaKind === "image" ? "[photo]" : "";
     const messageId = await recordInbound({
       conversationId: conversation.id,
-      body: text,
+      body: text || placeholder,
       waMessageId: waMessageIds[0],
     });
     if (messageId === null) {
@@ -136,7 +172,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
 
     let result;
     try {
-      result = await understander.understand({ history, message: text, products });
+      result = await understander.understand({ history, message: text, media, products });
     } catch (error) {
       // A model failure must never swallow a customer. Log it and hand to a human.
       log.error({ err: error, jid }, "understanding failed");
@@ -148,11 +184,17 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
     }
 
     const u = result.understanding;
+    // The bytes are not kept. What the model read becomes the stored turn, so
+    // every later turn sees the photo or voice note as ordinary history - and
+    // so you read the transcript, not "[voice note]", in the draft.
+    const storedBody = mediaKind && u.mediaSummary ? asStoredBody(mediaKind, u.mediaSummary, text) : null;
     await annotateInbound({
       messageId,
       understanding: u,
       model: result.model,
       latencyMs: result.latencyMs,
+      mediaKind,
+      body: storedBody ?? undefined,
     });
     await rememberCustomerDetails(customer, {
       customerName: u.entities.customerName,
@@ -183,9 +225,40 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
       "handled",
     );
 
+    // A misread photo is a worse failure than a misread sentence, so anything
+    // carrying media waits for a person even when the intent is an auto one.
+    const holdForMedia = media.length > 0 && !config.autoReplyMedia;
+
     if (decision.action === "auto_reply") {
-      await channel.send(jid, decision.reply);
-      await saveOutbound(conversation.id, decision.reply);
+      if (!holdForMedia) {
+        await channel.send(jid, decision.reply);
+        await saveOutbound(conversation.id, decision.reply);
+        return;
+      }
+      log.info({ jid, kind: mediaKind }, "media reply held for approval");
+      const held = await createDraft({
+        conversationId: conversation.id,
+        customerJid: jid,
+        incomingBody: storedBody ?? text,
+        draftReply: decision.reply,
+        intent: u.intent,
+        orderId,
+      });
+      await channel.send(
+        config.operatorJid,
+        renderDraftForOperator({
+          code: held.id,
+          customerJid: jid,
+          customerName: customer.name,
+          incoming: storedBody ?? text,
+          intent: u.intent,
+          confidence: u.confidence,
+          reason: `${mediaKind === "audio" ? "voice note" : "photo"} - held for approval`,
+          draft: decision.reply,
+          orderSummary,
+          orderId,
+        }),
+      );
       return;
     }
 
@@ -201,7 +274,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
         renderHandover({
           customerJid: jid,
           customerName: customer.name,
-          incoming: text,
+          incoming: storedBody ?? text,
           intent: u.intent,
           reason: decision.reason,
           acknowledged: config.autoAckEscalations ? decision.holdingReply : null,
@@ -211,10 +284,11 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
       return;
     }
 
+    const mediaNote = mediaKind === "audio" ? "voice note" : mediaKind === "image" ? "photo" : null;
     const draft = await createDraft({
       conversationId: conversation.id,
       customerJid: jid,
-      incomingBody: text,
+      incomingBody: storedBody ?? text,
       draftReply: decision.reply,
       intent: u.intent,
       orderId,
@@ -226,10 +300,10 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
         code: draft.id,
         customerJid: jid,
         customerName: customer.name,
-        incoming: text,
+        incoming: storedBody ?? text,
         intent: u.intent,
         confidence: u.confidence,
-        reason: decision.reason,
+        reason: mediaNote ? `${mediaNote} - ${decision.reason}` : decision.reason,
         draft: decision.reply,
         orderSummary,
         orderId,
@@ -238,4 +312,25 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
   }
 
   return { handle, flush };
+}
+
+/** Describes why media cannot be processed, or null when it can. */
+function mediaProblem(media: Attachment[], can: { image: boolean; audio: boolean }): string | null {
+  for (const m of media) {
+    if (m.data.length > config.maxMediaBytes) {
+      return `a ${m.kind === "audio" ? "voice note" : "photo"} too large to read (${Math.round(m.data.length / 1024)} KB)`;
+    }
+    if (m.kind === "audio" && !can.audio) return "a voice note, which this model cannot listen to";
+    if (m.kind === "image" && !can.image) return "a photo, which this model cannot see";
+  }
+  return null;
+}
+
+/** What gets written to the messages table in place of the bytes. */
+function asStoredBody(kind: "image" | "audio", summary: string, caption: string): string {
+  // A voice note IS the message, so the transcript stands alone.
+  if (kind === "audio") return caption ? `${summary}
+${caption}` : summary;
+  return caption ? `[photo: ${summary}]
+${caption}` : `[photo: ${summary}]`;
 }

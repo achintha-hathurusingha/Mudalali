@@ -56,6 +56,7 @@ export class FakeChannel implements Channel {
 /** Deterministic stand-in for the model, so code paths are tested without the network. */
 export class StubUnderstander implements Understander {
   readonly name = "stub";
+  readonly capabilities = { image: true, audio: true };
   calls = 0;
   constructor(private readonly reply: (input: UnderstandInput) => Partial<Understanding>) {}
 
@@ -86,6 +87,7 @@ export const baseUnderstanding: Understanding = {
   needsHuman: false,
   needsHumanReason: null,
   draftReply: "Ow thiyenawa.",
+  mediaSummary: null,
 };
 
 /** Pull the 4-char draft code out of an operator notification. */

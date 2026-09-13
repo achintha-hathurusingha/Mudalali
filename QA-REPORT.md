@@ -219,3 +219,45 @@ tells the operator what is still missing. Two regression tests cover both.
 
 This is the argument for the end-to-end script existing at all: the stubbed suite could not have
 found it, because the stub returned the same understanding every turn.
+
+---
+
+## Finding 15 closed — photos and voice notes, 2026-09-13
+
+The one item left open in the original report is now implemented and tested.
+
+**Design.** Media is converted to text exactly once, on arrival: a photo becomes a description, a
+voice note becomes its transcript, and that text is what is stored. The bytes never enter Postgres.
+Every later turn therefore reads media as ordinary history, and the conversation model is unchanged.
+
+**Provider capability is declared, not assumed.** `Understander.capabilities` is `{image, audio}`.
+Gemini has both. Claude has images only - there is no audio content block - so a voice note arriving
+on Claude is handed to a human rather than silently dropped.
+
+**Verified live** (`npm run test:media`, 0 findings):
+
+| Scenario | Result |
+|---|---|
+| Photo of a t-shirt + "meka thiyanawada?" | described it, matched TS-001 at Rs. 1890, asked to confirm, bound nothing |
+| Photo with no caption | same, and replied in Singlish rather than English |
+| Photo of running shoes | "ape gawa shoes naha" - escalated, invented nothing |
+| Voice note ordering a t-shirt | transcribed accurately, extracted TS-001 / L / Black, quoted Rs. 1890 |
+
+End to end against the live database, a voice note opened a conversation and became a confirmed
+order with name, phone, address and the correct Rs. 350 Colombo-area delivery fee.
+
+**Two defects found by testing, both fixed:**
+
+1. A caption-less photo carries no language signal, and the model defaulted to **English** - wrong
+   register for this shop. The prompt now defaults to Singlish unless earlier turns say otherwise.
+2. My own `repliesInSinglish` check was inert: a shell-escaping slip had written literal backspace
+   bytes where `\b` word boundaries belonged, so the regex matched nothing and the check passed
+   everything. Worth remembering that a check which never fails is indistinguishable from a check
+   that always passes.
+
+**Tests:** 28 offline (7 new, covering transcript storage, photo description, capability gating,
+the size cap, burst-with-media, and the no-auto-reply rule), 4 live media scenarios, and the
+end-to-end run.
+
+**Still open:** video, documents and stickers are ignored. Gemini reads video, so that is a small
+extension; documents and stickers are rarer and probably belong with a human anyway.

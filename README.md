@@ -121,6 +121,31 @@ fixtures - Singlish accuracy is the single biggest risk in this build, so measur
 | "Dehiwela" / "Colombo 07" / "Mt Lavinia" | `canonicalCity()` - alias table, postal-code stripping, then a typo-tolerant match |
 | Customer wants two t-shirts and a dress | `entities.items[]` is a list; `order_items` gets one row per line |
 | Item is out of stock, or the size does not exist | refused in `createDraftOrder`, with the reason shown to you |
+| A photo with "meka thiyanawada?" | matched against the catalog, named with its price, and confirmed with the customer before it binds to an order |
+| A voice note instead of typing | transcribed and treated as ordinary text - you read the transcript in the draft, not "[voice note]" |
+
+## Photos and voice notes
+
+Both are normal here, so both are first-class.
+
+- **The bytes are never stored.** A photo becomes `[photo: plain black crewneck t-shirt]`, a voice
+  note becomes its transcript, and that text is the stored turn. Every later turn reads it as
+  ordinary history, and you read the transcript in the draft.
+- **A photo never binds a product on its own.** The model names the closest catalog item with its
+  price and asks the customer to confirm - people send photos of things this shop does not sell.
+  A photo of running shoes escalates to you instead of inventing a product.
+- **Media never auto-replies** until you set `AUTO_REPLY_MEDIA=true`, even on an auto intent.
+- **Anything unreadable reaches a person**: too large, a failed download, or a provider that cannot
+  hear audio. `npm run test:media` covers all of those.
+
+```bash
+npm run fixtures      # once - generates tests/fixtures/ with Gemini
+npm run test:media    # photos + a voice note through the real model
+```
+
+The fixtures are generated speech and generated product photos. Real voice notes are recorded in
+noisy streets on cheap mics, so drop a few genuine ones into `tests/fixtures/` when you have them -
+that is the test that actually counts.
 
 ## What is deliberately not here
 

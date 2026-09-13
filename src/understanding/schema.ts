@@ -81,6 +81,14 @@ export const UnderstandingSchema = z.object({
   draftReply: z
     .string()
     .describe("The reply to send the customer, in their own language and script. Short, warm, WhatsApp-length."),
+  mediaSummary: z
+    .string()
+    .nullable()
+    .describe(
+      "Only when the customer sent a photo or voice note. For a voice note: the transcript, " +
+        "in the customer's own language and script. For a photo: a short factual description of " +
+        "what is in it. Null when no media was sent. This is what gets stored - the bytes are not kept.",
+    ),
 });
 
 export type Understanding = z.infer<typeof UnderstandingSchema>;

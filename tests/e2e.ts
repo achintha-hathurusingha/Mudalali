@@ -2,6 +2,7 @@
  * End-to-end smoke against the REAL database and REAL model.
  * Writes rows under a test JID and removes them at the end.
  */
+import { readFileSync, existsSync } from "node:fs";
 import { createPipeline } from "../src/action/handler.js";
 import { createUnderstander } from "../src/understanding/index.js";
 import { config } from "../src/config.js";
@@ -68,13 +69,26 @@ async function operator(text: string) {
   await pipeline.flush();
 }
 
-await customer("mata plain t shirt ekak oney, L size, black");
-const code1 = channel.lastCode();
-if (code1) await operator(`ok ${code1}`);
-
+// A voice note opens the conversation, exactly as a real customer would.
+const voicePath = "./tests/fixtures/voice-order.wav";
+if (existsSync(voicePath)) {
+  console.log("\ncustomer: (voice note)");
+  await pipeline.handle({
+    jid: CUSTOMER,
+    text: "",
+    media: [{ kind: "audio", mimeType: "audio/wav", data: readFileSync(voicePath), isVoiceNote: true }],
+    waMessageId: `E2E-V${++n}`,
+    pushName: "Test Nimal",
+  });
+  await pipeline.flush();
+  const code0 = channel.lastCode();
+  if (code0) await operator(`ok ${code0}`);
+} else {
+  await customer("mata plain t shirt ekak oney, L size, black");
+}
 await customer("ow ewanna. Nimal Perera, 45/2 Temple Road, Nugegoda, 0771234567");
 const code2 = channel.lastCode();
-if (code2 && code2 !== code1) await operator(`ok ${code2}`);
+if (code2) await operator(`ok ${code2}`);
 
 console.log("\n" + "=".repeat(60));
 const orders = await query<Record<string, unknown>>(

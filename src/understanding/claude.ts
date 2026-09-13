@@ -3,10 +3,16 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { config } from "../config.js";
 import { UnderstandingSchema } from "./schema.js";
 import { buildSystemPrompt, TASK_INSTRUCTION } from "./prompt.js";
-import type { Understander, UnderstandInput, UnderstandResult } from "./types.js";
+import type { Capabilities, Understander, UnderstandInput, UnderstandResult } from "./types.js";
+
+const CLAUDE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
+type ClaudeImageType = (typeof CLAUDE_IMAGE_TYPES)[number];
 
 export class ClaudeUnderstander implements Understander {
   readonly name = "claude";
+  /** Claude reads images. There is no audio content block, so voice notes
+   *  must reach a human instead of being silently dropped. */
+  readonly capabilities: Capabilities = { image: true, audio: false };
   private client: Anthropic;
 
   constructor() {
@@ -14,15 +20,31 @@ export class ClaudeUnderstander implements Understander {
     this.client = new Anthropic();
   }
 
-  async understand({ history, message, products }: UnderstandInput): Promise<UnderstandResult> {
+  async understand({ history, message, media, products }: UnderstandInput): Promise<UnderstandResult> {
     const started = Date.now();
+
+    const images = (media ?? []).filter((m) => m.kind === "image");
+    const unsupported = (media ?? []).filter((m) => m.kind !== "image");
+    if (unsupported.length > 0) {
+      throw new Error(`Claude cannot read ${unsupported[0]!.kind} - route this to a human`);
+    }
+
+    const content: Anthropic.ContentBlockParam[] = images.map((m) => ({
+      type: "image" as const,
+      source: {
+        type: "base64" as const,
+        media_type: asClaudeImageType(m.mimeType),
+        data: m.data.toString("base64"),
+      },
+    }));
+    content.push({ type: "text", text: message || "(the customer sent a photo with no text)" });
 
     const messages: Anthropic.MessageParam[] = [
       ...history.map((turn) => ({
         role: (turn.role === "customer" ? "user" : "assistant") as "user" | "assistant",
         content: turn.text,
       })),
-      { role: "user" as const, content: message },
+      { role: "user" as const, content },
     ];
 
     // First message must be from the user.
@@ -59,4 +81,10 @@ export class ClaudeUnderstander implements Understander {
       latencyMs: Date.now() - started,
     };
   }
+}
+
+function asClaudeImageType(mimeType: string): ClaudeImageType {
+  const normalised = mimeType === "image/jpg" ? "image/jpeg" : mimeType;
+  if ((CLAUDE_IMAGE_TYPES as readonly string[]).includes(normalised)) return normalised as ClaudeImageType;
+  throw new Error(`Claude does not accept ${mimeType}`);
 }

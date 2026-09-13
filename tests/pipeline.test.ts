@@ -400,3 +400,138 @@ describe("escalation", () => {
     assert.equal((await query(`select id from pending_drafts`)).length, 0, "nothing to approve");
   });
 });
+
+describe("photos and voice notes", () => {
+  const photo = (bytes = 1024) => ({
+    kind: "image" as const,
+    mimeType: "image/jpeg",
+    data: Buffer.alloc(bytes, 1),
+  });
+  const voiceNote = (bytes = 2048) => ({
+    kind: "audio" as const,
+    mimeType: "audio/ogg",
+    data: Buffer.alloc(bytes, 2),
+    isVoiceNote: true,
+    seconds: 6,
+  });
+
+  test("a voice note is stored as its transcript, not as bytes", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({
+      intent: "availability",
+      mediaSummary: "mata plain t shirt ekak oney, L size",
+      draftReply: "Ow thiyenawa!",
+    }));
+
+    await send({ jid: CUSTOMER, text: "", media: [voiceNote()], waMessageId: "V1" });
+
+    const rows = await query<{ body: string; media_kind: string }>(
+      `select body, media_kind from messages where direction = 'in'`,
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.body, "mata plain t shirt ekak oney, L size", "the transcript IS the message");
+    assert.equal(rows[0]!.media_kind, "audio");
+  });
+
+  test("a photo is stored as a description the next turn can read", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({
+      intent: "availability",
+      mediaSummary: "black cotton t-shirt, no print",
+      draftReply: "Meka Plain Cotton T-Shirt eka da?",
+    }));
+
+    await send({ jid: CUSTOMER, text: "meka thiyanawada?", media: [photo()], waMessageId: "P1" });
+
+    const rows = await query<{ body: string; media_kind: string }>(
+      `select body, media_kind from messages where direction = 'in'`,
+    );
+    assert.equal(rows[0]!.body, "[photo: black cotton t-shirt, no print]\nmeka thiyanawada?");
+    assert.equal(rows[0]!.media_kind, "image");
+  });
+
+  test("the operator reads the transcript, not a placeholder", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({
+      mediaSummary: "denim ekak thiyanawada?",
+      draftReply: "Samawenna, denim out of stock.",
+    }));
+
+    await send({ jid: CUSTOMER, text: "", media: [voiceNote()], waMessageId: "V2" });
+
+    assert.match(channel.to(OPERATOR)[0]!.text, /denim ekak thiyanawada\?/);
+    assert.doesNotMatch(channel.to(OPERATOR)[0]!.text, /\[voice note\]/);
+  });
+
+  test("a voice note a provider cannot hear goes to a human, not nowhere", async () => {
+    const channel = new FakeChannel();
+    const understander = new StubUnderstander(() => ({}));
+    // Claude has no audio content block.
+    (understander as { capabilities: { image: boolean; audio: boolean } }).capabilities = {
+      image: true,
+      audio: false,
+    };
+    const pipeline = createPipeline(channel, understander);
+
+    await pipeline.handle({ jid: CUSTOMER, text: "", media: [voiceNote()], waMessageId: "V3" });
+    await pipeline.flush();
+
+    assert.equal(understander.calls, 0, "no point calling a model that cannot listen");
+    assert.match(channel.to(OPERATOR)[0]!.text, /OVER TO YOU/);
+    assert.match(channel.to(OPERATOR)[0]!.text, /cannot listen to/);
+    const rows = await query(`select id from messages where direction = 'in'`);
+    assert.equal(rows.length, 1, "the message is still recorded so it is not lost");
+  });
+
+  test("media over the size cap is handed to a human", async () => {
+    const channel = new FakeChannel();
+    const { send, understander } = drive(channel, () => ({}));
+
+    await send({
+      jid: CUSTOMER,
+      text: "meka balanna",
+      media: [photo(config.maxMediaBytes + 1)],
+      waMessageId: "P2",
+    });
+
+    assert.equal(understander.calls, 0);
+    assert.match(channel.to(OPERATOR)[0]!.text, /too large to read/);
+  });
+
+  test("a photo, its caption and a follow-up stay one turn", async () => {
+    const channel = new FakeChannel();
+    const { send, understander } = drive(channel, () => ({
+      mediaSummary: "black t-shirt",
+      draftReply: "Ow!",
+    }));
+
+    await send(
+      { jid: CUSTOMER, text: "", media: [photo()], waMessageId: "B1" },
+      { jid: CUSTOMER, text: "meka thiyanawada?", waMessageId: "B2" },
+      { jid: CUSTOMER, text: "L size", waMessageId: "B3" },
+    );
+
+    assert.equal(understander.calls, 1, "one burst, one model call");
+    assert.equal(channel.to(OPERATOR).length, 1, "and one draft");
+    const rows = await query<{ body: string }>(`select body from messages where direction = 'in'`);
+    assert.match(rows[0]!.body, /black t-shirt/);
+    assert.match(rows[0]!.body, /meka thiyanawada\?\nL size/);
+  });
+
+  test("media never auto-replies, even on an auto intent", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({
+      intent: "greeting",
+      confidence: 0.99,
+      mediaSummary: "a t-shirt",
+      draftReply: "Ayubowan!",
+    }));
+
+    await send({ jid: CUSTOMER, text: "", media: [photo()], waMessageId: "P3" });
+
+    assert.equal(channel.to(CUSTOMER).length, 0, "a misread photo is worse than a misread sentence");
+    assert.equal(channel.to(OPERATOR).length, 1);
+    // However the draft got here, you must be able to see it came from a photo.
+    assert.match(channel.to(OPERATOR)[0]!.text, /photo/);
+  });
+});

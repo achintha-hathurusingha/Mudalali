@@ -31,6 +31,7 @@ create table if not exists messages (
   entities        jsonb,
   needs_human     boolean,
   language        text,
+  media_kind      text,                              -- image | audio | null
   model           text,
   latency_ms      int,
   wa_message_id   text,
@@ -94,3 +95,11 @@ create table if not exists pending_drafts (
 );
 
 create index if not exists pending_drafts_status_idx on pending_drafts (status, created_at);
+
+-- Additive migrations. Safe to re-run: `npm run db:setup` applies this whole
+-- file, and `create table if not exists` alone never adds a new column to a
+-- table that already exists.
+alter table messages add column if not exists media_kind text;
+alter table orders   add column if not exists customer_name text;
+alter table orders   add column if not exists phone text;
+alter table pending_drafts add column if not exists order_id int references orders(id) on delete set null;

@@ -69,4 +69,16 @@ export const config = {
    * escalated, instead of leaving them in silence until you reply.
    */
   autoAckEscalations: bool("AUTO_ACK_ESCALATIONS", true),
+
+  /**
+   * Largest photo or voice note we will send to the model. Gemini's inline
+   * limit is 20 MB for the whole request; WhatsApp caps media at 16 MB.
+   */
+  maxMediaBytes: Number(process.env.MAX_MEDIA_BYTES ?? 8 * 1024 * 1024),
+
+  /**
+   * A misread photo is a worse failure than a misread sentence, so media never
+   * auto-replies until you have watched it work. Applies even in auto mode.
+   */
+  autoReplyMedia: bool("AUTO_REPLY_MEDIA", false),
 } as const;
