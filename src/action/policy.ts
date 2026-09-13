@@ -29,8 +29,14 @@ export function decide(u: Understanding, settings: RuntimeSettings): Decision {
     };
   }
 
-  // Order capture always gets a human eye, even in auto mode.
-  if (u.intent === "place_order") {
+  // Capturing an order needs a human. Talking about ordering does not.
+  //
+  // Gating on the intent alone silenced real customers: deep in an order
+  // conversation the model reads a bare "Hi" or "thank you" as place_order, and
+  // a greeting would then sit unanswered forever. orderReady is the same
+  // condition that writes an order row, so the human check now lands exactly
+  // where an order is actually being made.
+  if (u.intent === "place_order" && u.orderReady) {
     return { action: "suggest", reply: u.draftReply, reason: "order capture always needs confirmation" };
   }
 

@@ -777,3 +777,54 @@ describe("delivering console approvals", () => {
     assert.equal(channel.to(CUSTOMER).length, 0, "the stop button must stop this too");
   });
 });
+
+describe("talking about an order is not capturing one", () => {
+  test("a greeting read as place_order still gets answered", async () => {
+    const channel = new FakeChannel();
+    // What the model actually did: "Hi", deep in an order conversation,
+    // classified place_order at 0.95 with nothing ready.
+    const { send } = drive(channel, () => ({
+      intent: "place_order",
+      confidence: 0.95,
+      orderReady: false,
+      draftReply: "Ayubowan! Mokakda oyata one?",
+    }));
+
+    await setSetting("mode", "auto", "test");
+    await setSetting("autoIntents", "greeting,availability,place_order", "test");
+
+    await send({ jid: CUSTOMER, text: "Hi", waMessageId: "G1" });
+
+    assert.deepEqual(
+      channel.to(CUSTOMER).map((s) => s.text),
+      ["Ayubowan! Mokakda oyata one?"],
+      "gating on the intent alone left real greetings unanswered forever",
+    );
+  });
+
+  test("an order actually being captured still waits for a human", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({
+      intent: "place_order",
+      confidence: 0.98,
+      orderReady: true,
+      entities: {
+        items: [{ productId: "TS-001", productName: "t shirt", size: "L", colour: "Black", quantity: 1 }],
+        customerName: "Nimal",
+        phone: "0771234567",
+        addressLine: "45/2 Temple Road",
+        city: "Colombo",
+        refersToEarlier: true,
+      },
+      draftReply: "Order eka confirm kara.",
+    }));
+
+    await setSetting("mode", "auto", "test");
+    await setSetting("autoIntents", "greeting,place_order", "test");
+
+    await send({ jid: CUSTOMER, text: "ow ewanna", waMessageId: "G2" });
+
+    assert.equal(channel.to(CUSTOMER).length, 0, "a real order must never confirm itself");
+    assert.equal(channel.to(OPERATOR).length, 1);
+  });
+});

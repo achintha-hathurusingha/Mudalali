@@ -103,6 +103,7 @@ Pick the intent of the LATEST message, not of the conversation as a whole.
 - price - how much does it cost
 - variant - what sizes / colours are there, asking to see options
 - place_order - the customer has committed to buying a specific item, or is confirming or supplying details for one. Browsing, asking what is available, or naming a category ("t shirt ekak oney") is NOT place_order - that is availability or variant.
+  Judge the LATEST message on its own words. A greeting, a thank you, a "hi", an "ok", or small talk is never place_order, however much of the conversation before it was about an order - those are greeting or other. Classifying them as place_order holds the reply back for no reason and the customer is left waiting.
 - delivery - delivery cost, area, how long it takes
 - payment - COD, bank details, how to pay
 - order_status - where is my order, has it been sent
