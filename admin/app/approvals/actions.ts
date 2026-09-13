@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isSignedIn } from "@/lib/auth";
 import { resolveDraft, saveEditedDraft } from "@/lib/approvals";
 
 /**
@@ -15,6 +16,19 @@ type Decision = { ok: true } | { ok: false; reason: string };
 
 const ALREADY_ANSWERED = "That draft was already answered somewhere else.";
 
+/**
+ * Server actions are public POST endpoints. `proxy.ts` gates them, but an
+ * approval is the single most outward-facing thing this console does - it puts
+ * a message in front of a real customer on WhatsApp - so it does not rest on
+ * one layer.
+ */
+const EXPIRED = "Your session has expired. Reload the page and sign in again.";
+
+async function denyIfSignedOut(): Promise<Decision | null> {
+  if (await isSignedIn()) return null;
+  return { ok: false, reason: EXPIRED };
+}
+
 /** Draft ids are the 4-character codes the owner used to type into WhatsApp. */
 function draftId(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -23,6 +37,9 @@ function draftId(value: unknown): string | null {
 }
 
 export async function approveDraft(id: unknown): Promise<Decision> {
+  const denied = await denyIfSignedOut();
+  if (denied) return denied;
+
   const key = draftId(id);
   if (!key) return { ok: false, reason: "That is not a draft code." };
 
@@ -32,6 +49,9 @@ export async function approveDraft(id: unknown): Promise<Decision> {
 }
 
 export async function skipDraft(id: unknown): Promise<Decision> {
+  const denied = await denyIfSignedOut();
+  if (denied) return denied;
+
   const key = draftId(id);
   if (!key) return { ok: false, reason: "That is not a draft code." };
 
@@ -41,6 +61,9 @@ export async function skipDraft(id: unknown): Promise<Decision> {
 }
 
 export async function editDraft(id: unknown, reply: unknown): Promise<Decision> {
+  const denied = await denyIfSignedOut();
+  if (denied) return denied;
+
   const key = draftId(id);
   if (!key) return { ok: false, reason: "That is not a draft code." };
 

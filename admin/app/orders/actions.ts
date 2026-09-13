@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isSignedIn } from "@/lib/auth";
 import { one } from "@/lib/db";
 import { missingShippingFields } from "@/lib/orders";
 
@@ -11,6 +12,16 @@ import { missingShippingFields } from "@/lib/orders";
  */
 
 type Result = { ok: boolean; message: string; description?: string };
+
+/**
+ * Server actions are public POST endpoints. `proxy.ts` gates them; these are
+ * checked again because they move money and fulfilment, and one layer is thin
+ * for that.
+ */
+async function denyIfSignedOut(): Promise<Result | null> {
+  if (await isSignedIn()) return null;
+  return { ok: false, message: "Your session has expired.", description: "Reload the page and sign in again." };
+}
 
 function asId(orderId: number): number | null {
   return Number.isInteger(orderId) && orderId > 0 ? orderId : null;
@@ -47,6 +58,9 @@ type StatusRow = {
  * a form on this page.
  */
 export async function confirmOrder(orderId: number): Promise<Result> {
+  const denied = await denyIfSignedOut();
+  if (denied) return denied;
+
   const id = asId(orderId);
   if (!id) return { ok: false, message: "That is not an order." };
 
@@ -81,6 +95,9 @@ export async function confirmOrder(orderId: number): Promise<Result> {
 
 /** Shipped is the end of the line - there is no un-ship. */
 export async function markOrderShipped(orderId: number): Promise<Result> {
+  const denied = await denyIfSignedOut();
+  if (denied) return denied;
+
   const id = asId(orderId);
   if (!id) return { ok: false, message: "That is not an order." };
 
@@ -99,6 +116,9 @@ export async function markOrderShipped(orderId: number): Promise<Result> {
 }
 
 export async function cancelOrder(orderId: number): Promise<Result> {
+  const denied = await denyIfSignedOut();
+  if (denied) return denied;
+
   const id = asId(orderId);
   if (!id) return { ok: false, message: "That is not an order." };
 
