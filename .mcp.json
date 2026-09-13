@@ -1,0 +1,36 @@
+{
+  "mcpServers": {
+    "db": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@bytebase/dbhub",
+        "--transport",
+        "stdio",
+        "--config",
+        "./dbhub.toml"
+      ],
+      "env": {}
+    },
+    "chrome": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest"
+      ],
+      "env": {}
+    },
+    "shadcn": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "shadcn@latest",
+        "mcp"
+      ],
+      "env": {}
+    }
+  }
+}
