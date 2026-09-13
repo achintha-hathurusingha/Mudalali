@@ -128,3 +128,112 @@
     @apply font-sans;
   }
 }
+/* ---------------------------------------------------------------------------
+   Mudalali — the ledger
+
+   A mudalali keeps accounts in a ruled book, so this console is a ledger:
+   ruled rows instead of cards, headings in the margin beside their rows
+   instead of stacked above them, figures right-aligned and tabular.
+
+   Palette is paper and ink, rooted in Sri Lankan retail: green-bar accounting
+   stock, fountain-pen blue-black, and the shop's own stamp colours - maroon
+   for stop, turmeric for waiting, leaf for settled.
+--------------------------------------------------------------------------- */
+
+:root {
+  --paper: #e9ede7;
+  --paper-raised: #f2f5ef;
+  --paper-sunk: #dfe5dd;
+  --rule: #c3cdc4;
+  --rule-strong: #9fada1;
+
+  --ink: #17242e;
+  --ink-soft: #5c6b72;
+  --ink-faint: #8b979b;
+
+  --stamp-stop: #7b2b33;
+  --stamp-wait: #a8760d;
+  --stamp-settled: #2e6b4c;
+
+  /* shadcn contract, repainted */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper-raised);
+  --card-foreground: var(--ink);
+  --popover: var(--paper-raised);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper-raised);
+  --secondary: var(--paper-sunk);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-sunk);
+  --muted-foreground: var(--ink-soft);
+  --accent: var(--paper-sunk);
+  --accent-foreground: var(--ink);
+  --destructive: var(--stamp-stop);
+  --border: var(--rule);
+  --input: var(--rule-strong);
+  --ring: var(--ink-soft);
+
+  /* A ledger is ruled, not rounded. */
+  --radius: 0.125rem;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-raised: var(--paper-raised);
+  --color-paper-sunk: var(--paper-sunk);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-faint: var(--ink-faint);
+  --color-stop: var(--stamp-stop);
+  --color-wait: var(--stamp-wait);
+  --color-settled: var(--stamp-settled);
+  --font-display: var(--font-display);
+}
+
+@layer base {
+  body {
+    /* The faint horizontal ruling of accounting paper. */
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent,
+      transparent 31px,
+      color-mix(in srgb, var(--rule) 34%, transparent) 31px,
+      color-mix(in srgb, var(--rule) 34%, transparent) 32px
+    );
+  }
+
+  /* Figures line up in columns, as they must in a ledger. */
+  table,
+  input[type="number"],
+  .figures {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+}
+
+@layer components {
+  /* A ruled row: the ledger's only container. Not a card. */
+  .rule-row {
+    border-bottom: 1px solid var(--rule);
+  }
+  .rule-row:last-child {
+    border-bottom: 0;
+  }
+
+  /* An inked stamp, for state that has been decided. */
+  .stamp {
+    display: inline-flex;
+    align-items: center;
+    border: 1.5px solid currentColor;
+    border-radius: 2px;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    transform: rotate(-1.2deg);
+  }
+}

@@ -1,18 +1,32 @@
 import { Nav } from "@/components/nav";
 import { readSettings } from "@/lib/settings";
 import { asBool, asNumber, asList } from "@/lib/settings-shared";
-import { Separator } from "@/components/ui/separator";
-import {
-  PauseControl,
-  ModeControl,
-  AutoIntentsControl,
-  ToggleControl,
-  NumberControl,
-} from "./controls";
+import { ShopState, ModeControl, AutoIntentsControl, ToggleControl, NumberControl } from "./controls";
 
 export const dynamic = "force-dynamic";
 
-function lastChanged(row?: { updated_at: string; updated_by: string | null }): string | null {
+/** Section names sit in the margin beside their rows, the way a ledger is annotated. */
+function Section({
+  name,
+  note,
+  children,
+}: {
+  name: string;
+  note?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mb-10 grid gap-x-10 gap-y-2 sm:grid-cols-[9rem_1fr]">
+      <div className="sm:pt-4">
+        <h2 className="font-display text-xl leading-none">{name}</h2>
+        {note ? <p className="text-ink-faint mt-1.5 text-xs leading-snug">{note}</p> : null}
+      </div>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function changedLine(row?: { updated_at: string; updated_by: string | null }): string | null {
   if (!row) return null;
   const when = new Date(row.updated_at).toLocaleString("en-GB", {
     day: "numeric",
@@ -28,97 +42,64 @@ export default async function SettingsPage() {
 
   const paused = asBool(settings.paused, false);
   const mode = settings.mode?.value ?? "suggest";
+  const autoIntents = asList(settings.autoIntents);
+  const lastTouched = changedLine(settings.mode);
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
+    <main className="mx-auto max-w-3xl px-5 py-10 sm:px-8">
       <Nav current="/settings" />
 
-      <div className="mb-8">
-        <h1 className="text-xl font-semibold tracking-tight">Agent controls</h1>
-        <p className="text-muted-foreground text-sm">
-          Changes reach the running agent within a few seconds. Nothing restarts.
-        </p>
-      </div>
+      <ShopState paused={paused} mode={mode} autoCount={autoIntents.length} />
 
-      <div className="space-y-8">
-        <PauseControl paused={paused} />
+      <Section name="Replying" note={lastTouched ? `Last touched ${lastTouched}` : undefined}>
+        <ModeControl mode={mode} />
+        <AutoIntentsControl selected={autoIntents} />
+      </Section>
 
-        <section className="space-y-3">
-          <div>
-            <h2 className="text-sm font-medium">Reply mode</h2>
-            <p className="text-muted-foreground text-sm">
-              {lastChanged(settings.mode) ? `Last changed by ${lastChanged(settings.mode)}` : "Never changed"}
-            </p>
-          </div>
-          <ModeControl mode={mode} />
-        </section>
+      <Section name="Care" note="What it must not decide alone">
+        <NumberControl
+          settingKey="minConfidence"
+          name="How sure before it replies alone"
+          help="Under this, the reply waits for you even in Auto. Between 0 and 1."
+          value={asNumber(settings.minConfidence, 0.8)}
+          step={0.05}
+          min={0}
+          max={1}
+        />
+        <ToggleControl
+          settingKey="autoReplyMedia"
+          name="Answer photos on its own"
+          help="A misread photo is a worse mistake than a misread sentence. Leave this off until you have watched it work."
+          value={asBool(settings.autoReplyMedia, false)}
+        />
+        <ToggleControl
+          settingKey="autoAckEscalations"
+          name="Say something when it hands over"
+          help="Sends a short holding line the moment a message comes to you, so nobody sits in silence."
+          value={asBool(settings.autoAckEscalations, true)}
+        />
+      </Section>
 
-        <section className="space-y-3">
-          <div>
-            <h2 className="text-sm font-medium">Which messages may answer themselves</h2>
-            <p className="text-muted-foreground text-sm">
-              Only applies in Auto mode. Bargaining, complaints and order status always reach you —
-              those are relationship moments, not classification problems.
-            </p>
-          </div>
-          <AutoIntentsControl selected={asList(settings.autoIntents)} />
-        </section>
-
-        <Separator />
-
-        <section>
-          <h2 className="mb-1 text-sm font-medium">Safety</h2>
-          <div className="divide-y">
-            <NumberControl
-              settingKey="minConfidence"
-              label="Confidence needed to reply alone"
-              help="Below this, the reply waits for you even in Auto mode. 0 to 1."
-              value={asNumber(settings.minConfidence, 0.8)}
-              step={0.05}
-              min={0}
-              max={1}
-            />
-            <ToggleControl
-              settingKey="autoReplyMedia"
-              label="Answer photos without me"
-              help="A misread photo is a worse mistake than a misread sentence. Leave off until you have watched it work."
-              value={asBool(settings.autoReplyMedia, false)}
-            />
-            <ToggleControl
-              settingKey="autoAckEscalations"
-              label="Tell customers straight away when I need to step in"
-              help="Sends a short holding line the moment something is handed to you, instead of leaving them in silence."
-              value={asBool(settings.autoAckEscalations, true)}
-            />
-          </div>
-        </section>
-
-        <Separator />
-
-        <section>
-          <h2 className="mb-1 text-sm font-medium">Timing</h2>
-          <div className="divide-y">
-            <NumberControl
-              settingKey="debounceMs"
-              label="Wait for someone still typing"
-              help="People send one thought as three messages. Waiting groups them into one reply."
-              value={asNumber(settings.debounceMs, 5000)}
-              step={500}
-              min={0}
-              suffix="ms"
-            />
-            <NumberControl
-              settingKey="historyTurns"
-              label="How much of the conversation the AI sees"
-              help="More context costs more per message but resolves 'eka ekak ewanna' better."
-              value={asNumber(settings.historyTurns, 10)}
-              min={2}
-              max={40}
-              suffix="turns"
-            />
-          </div>
-        </section>
-      </div>
+      <Section name="Timing" note="How it listens">
+        <NumberControl
+          settingKey="debounceMs"
+          name="Wait for someone still typing"
+          help="People send one thought as three messages. Waiting gathers them into one reply."
+          value={asNumber(settings.debounceMs, 5000)}
+          step={500}
+          min={0}
+          unit="ms"
+        />
+        <NumberControl
+          settingKey="historyTurns"
+          name="How much it remembers"
+          help="More context costs a little more per message, and is how it knows what &ldquo;eka ekak ewanna&rdquo; refers to."
+          value={asNumber(settings.historyTurns, 10)}
+          min={2}
+          max={40}
+          unit="turns"
+        />
+      </Section>
     </main>
   );
 }

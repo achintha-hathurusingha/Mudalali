@@ -1,31 +1,48 @@
-import { Toaster } from "@/components/ui/sonner";
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Instrument_Serif, IBM_Plex_Sans, Noto_Sans_Sinhala } from "next/font/google";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+/**
+ * Two voices, deliberately distinct: a high-contrast serif that only ever
+ * speaks in headings and figures, and a workmanlike sans for everything the
+ * owner actually reads. Sinhala sits in the same stack as the sans so it
+ * resolves without reading as a third family.
+ */
+const display = Instrument_Serif({
+  variable: "--font-display",
   subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const sans = IBM_Plex_Sans({
+  variable: "--font-plex",
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
+});
+
+const sinhala = Noto_Sans_Sinhala({
+  variable: "--font-sinhala",
+  subsets: ["sinhala"],
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
-  title: "Mudalali console",
-  description: "Run the shop: catalog, orders and the WhatsApp agent.",
+  title: "Mudalali",
+  description: "Run the shop: replies, stock, orders, and what the agent is allowed to do.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}
-        <Toaster position="bottom-right" /></body>
+    <html lang="en">
+      <body
+        className={`${display.variable} ${sans.variable} ${sinhala.variable} antialiased`}
+        style={{ fontFamily: "var(--font-plex), var(--font-sinhala), system-ui, sans-serif" }}
+      >
+        {children}
+        <Toaster position="bottom-right" />
+      </body>
     </html>
   );
 }
