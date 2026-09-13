@@ -1,0 +1,7 @@
+{
+  "enabledMcpjsonServers": [
+    "db",
+    "chrome",
+    "shadcn"
+  ]
+}

@@ -2,10 +2,9 @@
   "mcpServers": {
     "db": {
       "type": "stdio",
-      "command": "npx",
+      "command": "node",
       "args": [
-        "-y",
-        "@bytebase/dbhub",
+        "node_modules/@bytebase/dbhub/dist/index.js",
         "--transport",
         "stdio",
         "--config",
@@ -15,10 +14,9 @@
     },
     "chrome": {
       "type": "stdio",
-      "command": "npx",
+      "command": "node",
       "args": [
-        "-y",
-        "chrome-devtools-mcp@latest"
+        "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
       ],
       "env": {}
     },

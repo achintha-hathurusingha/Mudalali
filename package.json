@@ -34,11 +34,13 @@
     "zod": "^4.6.1"
   },
   "devDependencies": {
+    "@bytebase/dbhub": "^1.2.3",
     "@hapi/boom": "^10.0.1",
     "@types/node": "^22.20.2",
     "@types/pg": "^8.23.1",
     "@types/qrcode": "^1.5.6",
     "@types/qrcode-terminal": "^0.12.2",
+    "chrome-devtools-mcp": "^1.9.0",
     "cross-env": "^10.1.0",
     "pg-mem": "^3.0.14",
     "pino-pretty": "^13.1.3",
