@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { MoreHorizontalIcon, PlusIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { MoreHorizontalIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { toast } from "sonner";
 import { addProduct, editProduct, removeProduct, toggleActive } from "./actions";
 import {
@@ -14,8 +14,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -32,17 +30,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
 /**
@@ -73,9 +60,9 @@ const LOW_STOCK = 5;
 
 type Filter = "all" | "attention" | "hidden";
 
-/** Deterministic grouping, so the server and the browser render the same string. */
-function rupees(value: number): string {
-  return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+/** The shop writes money one way: Rs. 1890. No separators, no decimals. */
+function lkr(amount: number): string {
+  return `Rs. ${Math.round(amount)}`;
 }
 
 /** Mirrors the parsing in actions.ts, so the hint shows what will be saved. */
@@ -93,32 +80,190 @@ function parseList(raw: string): string[] {
   return out;
 }
 
-function StockCell({ stock }: { stock: number }) {
-  if (stock === 0) return <Badge variant="destructive">Out of stock</Badge>;
-  if (stock < LOW_STOCK) {
-    return (
-      <Badge className="border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400">
-        Low &middot; {stock}
-      </Badge>
-    );
+/* ------------------------------------------------------------- the colours */
+
+/**
+ * It is a clothing shop: "Navy" should look navy. Names the shop actually
+ * writes, plus enough of the usual English wardrobe to cover a new line going
+ * in at the counter. Anything unrecognised still gets a dot - a stable hue
+ * derived from the word - rather than nothing, so the row never looks broken.
+ */
+const COLOUR_HEX: Record<string, string> = {
+  black: "#17171c",
+  white: "#f4f4ef",
+  offwhite: "#ece8de",
+  ivory: "#f5efdf",
+  cream: "#f0e4c8",
+  beige: "#e2cfab",
+  tan: "#d2a679",
+  khaki: "#b8a369",
+  brown: "#8b5a2b",
+  chocolate: "#5a3825",
+  grey: "#9aa1ad",
+  gray: "#9aa1ad",
+  charcoal: "#3a3f4a",
+  silver: "#c6ccd4",
+  navy: "#1c2f63",
+  blue: "#2f6fe4",
+  denim: "#3f6187",
+  indigo: "#4b45cc",
+  sky: "#47b6ff",
+  turquoise: "#1fb6c9",
+  teal: "#159c8c",
+  mint: "#7fd8a8",
+  green: "#2e9e4f",
+  olive: "#6f7a35",
+  lime: "#a7cf3a",
+  yellow: "#e8c02a",
+  mustard: "#cf9f21",
+  gold: "#d4af37",
+  orange: "#ef7d2b",
+  peach: "#f4b393",
+  coral: "#f4705c",
+  red: "#d8332f",
+  rust: "#b0491f",
+  maroon: "#7a2130",
+  burgundy: "#5f1c2c",
+  wine: "#63213a",
+  pink: "#e96aa0",
+  rose: "#e0637d",
+  magenta: "#cf3fbf",
+  purple: "#7c46cf",
+  violet: "#8b5cf6",
+  lavender: "#b9a9ef",
+  multicolour: "#8b5cf6",
+  multicolor: "#8b5cf6",
+  printed: "#8b5cf6",
+};
+
+const SHADE_WORDS = ["light", "dark", "deep", "pale", "bright", "hot", "off", "dull"];
+
+function colourSwatch(name: string): string {
+  const key = name.toLowerCase().replace(/[^a-z]/g, "");
+  if (!key) return "hsl(220 10% 55%)";
+  if (COLOUR_HEX[key]) return COLOUR_HEX[key];
+
+  for (const word of SHADE_WORDS) {
+    if (key.startsWith(word)) {
+      const base = COLOUR_HEX[key.slice(word.length)];
+      if (base) return base;
+    }
   }
-  return <span className="tabular-nums">{stock}</span>;
+  for (const base of Object.keys(COLOUR_HEX)) {
+    if (key.length > base.length && key.endsWith(base)) return COLOUR_HEX[base];
+  }
+
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) % 360;
+  return `hsl(${hash} 52% 58%)`;
 }
 
-function Chips({ values }: { values: string[] }) {
-  if (values.length === 0) return <span className="text-muted-foreground">&mdash;</span>;
+/** The dot is the decoration; the word beside it is what a screen reader gets. */
+function ColourDot({ name, className }: { name: string; className?: string }) {
   return (
-    <div className="flex flex-wrap gap-1">
-      {values.map((value) => (
-        <span key={value} className="rounded border px-1.5 py-0.5 text-xs whitespace-nowrap">
-          {value}
-        </span>
-      ))}
+    <span
+      aria-hidden
+      className={cn(
+        "size-3 shrink-0 rounded-full border border-white/35 shadow-[0_1px_3px_rgb(0_0_0/0.55)]",
+        className,
+      )}
+      style={{ background: colourSwatch(name) }}
+    />
+  );
+}
+
+/* --------------------------------------------------------------- the stock */
+
+type Tone = {
+  chip: string;
+  label: string;
+  accent: string;
+};
+
+function stockTone(stock: number): Tone {
+  if (stock === 0) {
+    return { chip: "chip-rose", label: "Out of stock", accent: "var(--rose)" };
+  }
+  if (stock < LOW_STOCK) {
+    return { chip: "chip-saffron", label: `Low · ${stock} left`, accent: "var(--saffron)" };
+  }
+  return { chip: "chip-teal", label: `${stock} in stock`, accent: "var(--teal)" };
+}
+
+/**
+ * Out of stock first - it is the only row that is costing the shop money right
+ * now - then low, then the healthy ones, then anything hidden from the agent.
+ */
+function rank(product: Product): number {
+  if (!product.active) return 3;
+  if (product.stock === 0) return 0;
+  if (product.stock < LOW_STOCK) return 1;
+  return 2;
+}
+
+/* -------------------------------------------------------------- the motion */
+
+/** Counts from the old value to the new one, so a saved number is seen moving. */
+function useCountUp(value: number): number {
+  const [shown, setShown] = useState(value);
+  const shownRef = useRef(value);
+
+  useEffect(() => {
+    const from = shownRef.current;
+    if (from === value) return;
+
+    // A reduced-motion reader gets the same code path with no duration: one
+    // frame, straight to the new value. setState stays inside the callback.
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const duration = reduced ? 0 : 600;
+
+    let frame = 0;
+    const started = performance.now();
+    const step = (now: number) => {
+      const progress = duration === 0 ? 1 : Math.min(1, (now - started) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const next = Math.round(from + (value - from) * eased);
+      shownRef.current = next;
+      setShown(next);
+      if (progress < 1) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [value]);
+
+  return shown;
+}
+
+function Figure({
+  value,
+  label,
+  money = false,
+  className,
+}: {
+  value: number;
+  label: string;
+  money?: boolean;
+  className?: string;
+}) {
+  const shown = useCountUp(value);
+  return (
+    <div>
+      <p className={cn("font-display tnum text-2xl leading-none font-semibold sm:text-[1.75rem]", className)}>
+        {money ? lkr(shown) : shown}
+      </p>
+      <p className="text-faint mt-1.5 text-[11px]">{label}</p>
     </div>
   );
 }
 
-export function CatalogTable({ products }: { products: Product[] }) {
+const FIELD =
+  "bg-surface-2 border-line focus:border-saffron placeholder:text-faint w-full rounded-xl border px-3.5 py-2.5 text-sm outline-none transition-colors disabled:opacity-50";
+
+/* --------------------------------------------------------------- the screen */
+
+export function StockScreen({ products }: { products: Product[] }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [editing, setEditing] = useState<Product | "new" | null>(null);
@@ -129,11 +274,13 @@ export function CatalogTable({ products }: { products: Product[] }) {
   const outOfStock = products.filter((p) => p.active && p.stock === 0);
   const lowStock = products.filter((p) => p.active && p.stock > 0 && p.stock < LOW_STOCK);
   const hidden = products.filter((p) => !p.active);
+  const onSale = products.filter((p) => p.active);
   const anyPhotos = products.some((p) => p.photo_colours.length > 0);
+  const shelfValue = onSale.reduce((sum, p) => sum + p.price_lkr * p.stock, 0);
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return products.filter((product) => {
+    const matched = products.filter((product) => {
       if (filter === "attention" && !(product.active && product.stock < LOW_STOCK)) return false;
       if (filter === "hidden" && product.active) return false;
       if (!needle) return true;
@@ -148,6 +295,7 @@ export function CatalogTable({ products }: { products: Product[] }) {
         .toLowerCase();
       return haystack.includes(needle);
     });
+    return matched.sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id));
   }, [products, search, filter]);
 
   function runRowAction(id: string, action: () => Promise<ActionResult>, success: string) {
@@ -163,194 +311,165 @@ export function CatalogTable({ products }: { products: Product[] }) {
     });
   }
 
-  const filters: { id: Filter; label: string; count: number }[] = [
-    { id: "all", label: "All", count: products.length },
-    { id: "attention", label: "Needs stock", count: outOfStock.length + lowStock.length },
-    { id: "hidden", label: "Hidden", count: hidden.length },
+  const filters: { id: Filter; label: string; count: number; tone: string }[] = [
+    { id: "all", label: "All", count: products.length, tone: "chip-muted" },
+    {
+      id: "attention",
+      label: "Needs stock",
+      count: outOfStock.length + lowStock.length,
+      tone: outOfStock.length > 0 ? "chip-rose" : "chip-saffron",
+    },
+    { id: "hidden", label: "Hidden", count: hidden.length, tone: "chip-muted" },
   ];
+
+  const trouble = outOfStock.length > 0;
+  const headline = trouble
+    ? outOfStock.length === 1
+      ? `${outOfStock[0].name} is out of stock.`
+      : `${outOfStock.length} products are out of stock.`
+    : lowStock.length > 0
+      ? `${lowStock.length} running low.`
+      : "Everything is on the shelf.";
 
   return (
     <div>
-      {outOfStock.length > 0 ? (
-        <div className="border-destructive/50 bg-destructive/5 text-destructive mb-4 rounded-lg border px-3 py-2 text-sm">
-          {outOfStock.length === 1
-            ? `${outOfStock[0].id} ${outOfStock[0].name} is out of stock. The agent is refusing orders for it.`
-            : `${outOfStock.length} products are out of stock. The agent is refusing orders for them.`}
-        </div>
-      ) : null}
-
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search code, name or colour"
-          aria-label="Search products"
-          className="h-8 w-full sm:w-64"
+      <section
+        className={cn(
+          "rise glass relative overflow-hidden rounded-3xl p-6 sm:p-8",
+          trouble && "glow-rose",
+        )}
+        style={{ "--i": 1 } as React.CSSProperties}
+      >
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -top-24 -right-16 size-72 rounded-full opacity-25 blur-3xl"
+          style={{ background: trouble ? "var(--rose)" : "var(--grad-money)" }}
         />
-        <div className="flex items-center gap-1">
-          {filters.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setFilter(option.id)}
-              className={cn(
-                "rounded-md border px-2.5 py-1 text-sm transition-colors",
-                filter === option.id ? "border-foreground bg-accent" : "hover:bg-accent/50",
-                option.id === "attention" &&
-                  option.count > 0 &&
-                  filter !== option.id &&
-                  "text-destructive",
-              )}
-            >
-              {option.label} {option.count}
-            </button>
-          ))}
-        </div>
-        <Button size="sm" className="ml-auto h-8" onClick={() => setEditing("new")}>
-          <PlusIcon />
-          Add product
-        </Button>
-      </div>
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Product</TableHead>
-              <TableHead className="text-right">Price</TableHead>
-              <TableHead className="w-28">Stock</TableHead>
-              <TableHead>Sizes</TableHead>
-              <TableHead>Colours</TableHead>
-              <TableHead className="w-24">Updated</TableHead>
-              <TableHead className="w-24 text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {visible.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground py-8 text-center text-sm">
-                  {products.length === 0
-                    ? "No products yet. Add the first one - the agent cannot quote what is not here."
-                    : "Nothing matches that filter."}
-                </TableCell>
-              </TableRow>
-            ) : null}
+        <div className="relative">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <span className={cn("chip", trouble ? "chip-rose" : lowStock.length > 0 ? "chip-saffron" : "chip-teal")}>
+                <span className={cn("size-1.5 rounded-full bg-current", trouble && "breathe")} />
+                {trouble
+                  ? `${outOfStock.length} out of stock`
+                  : lowStock.length > 0
+                    ? `${lowStock.length} running low`
+                    : "Fully stocked"}
+              </span>
 
-            {visible.map((product) => (
-              <TableRow
-                key={product.id}
+              <h1
                 className={cn(
-                  product.active && product.stock === 0 && "bg-destructive/5",
-                  !product.active && "opacity-60",
-                  pending && busyId === product.id && "opacity-50",
+                  "font-display mt-4 max-w-[18ch] text-[1.75rem] leading-[1.12] font-semibold tracking-tight sm:text-4xl",
+                  trouble ? "text-rose" : "text-grad-money",
                 )}
               >
-                <TableCell className="align-top">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{product.name}</span>
-                    {product.active ? null : <Badge variant="outline">Hidden from agent</Badge>}
-                  </div>
-                  <div className="text-muted-foreground text-xs">
-                    <span className="font-mono">{product.id}</span>
-                    {product.name_si ? <span> &middot; {product.name_si}</span> : null}
-                    {anyPhotos ? (
-                      <span>
-                        {" "}
-                        &middot;{" "}
-                        {product.photo_colours.length > 0
-                          ? `${product.photo_colours.length} photos`
-                          : "no photos"}
-                      </span>
-                    ) : null}
-                  </div>
-                </TableCell>
-                <TableCell className="text-right align-top whitespace-nowrap tabular-nums">
-                  Rs {rupees(product.price_lkr)}
-                </TableCell>
-                <TableCell className="align-top">
-                  <StockCell stock={product.stock} />
-                </TableCell>
-                <TableCell className="align-top">
-                  <Chips values={product.sizes} />
-                </TableCell>
-                <TableCell className="align-top">
-                  <Chips values={product.colours} />
-                </TableCell>
-                <TableCell
-                  className="text-muted-foreground align-top text-xs whitespace-nowrap"
-                  title={product.updated_at}
-                >
-                  {product.updated_label}
-                </TableCell>
-                <TableCell className="align-top">
-                  <div className="flex items-center justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7"
-                      onClick={() => setEditing(product)}
-                    >
-                      Edit
-                    </Button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          aria-label={`More actions for ${product.id}`}
-                        >
-                          <MoreHorizontalIcon />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="end"
-                        onCloseAutoFocus={(event) => event.preventDefault()}
-                      >
-                        <DropdownMenuItem
-                          disabled={pending}
-                          onSelect={() =>
-                            runRowAction(
-                              product.id,
-                              () => toggleActive(product.id, !product.active),
-                              product.active
-                                ? `${product.id} is hidden from the agent.`
-                                : `${product.id} is back on sale.`,
-                            )
-                          }
-                        >
-                          {product.active ? "Deactivate" : "Activate"}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        {product.order_lines > 0 ? (
-                          <>
-                            <DropdownMenuItem disabled>Delete</DropdownMenuItem>
-                            <DropdownMenuLabel className="text-muted-foreground max-w-56 text-xs font-normal whitespace-normal">
-                              On {product.order_lines} order line
-                              {product.order_lines === 1 ? "" : "s"} - deleting would break those
-                              orders. Deactivate instead.
-                            </DropdownMenuLabel>
-                          </>
-                        ) : (
-                          <DropdownMenuItem
-                            variant="destructive"
-                            disabled={pending}
-                            onSelect={() => setConfirming(product)}
-                          >
-                            Delete
-                          </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                {headline}
+              </h1>
+
+              <p className="text-dim mt-3 max-w-[52ch] text-sm">
+                {trouble
+                  ? outOfStock.length === 1
+                    ? "The agent is refusing every order for it, and saying so in the chat. Put a number back in and it starts selling again on its next message."
+                    : "The agent is refusing every order for them, and saying so in the chat. Put numbers back in and it starts selling again on its next message."
+                  : "These are the prices and counts the agent quotes. A wrong number here reaches a customer in the next message."}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setEditing("new")}
+              className="bg-saffron shrink-0 cursor-pointer rounded-xl px-4 py-2.5 text-sm font-semibold text-[#1a1206] shadow-[0_10px_30px_-12px_var(--saffron)] transition-all hover:brightness-110 active:scale-[0.98]"
+            >
+              <PlusIcon className="mr-1.5 -ml-0.5 inline size-4 align-[-3px]" />
+              Add product
+            </button>
+          </div>
+
+          <div className="border-line mt-7 flex flex-wrap gap-x-9 gap-y-5 border-t pt-5">
+            <Figure value={shelfValue} label="On the shelf, at retail" money className="text-grad-money" />
+            <Figure value={onSale.length} label="On sale" className="text-teal" />
+            <Figure value={lowStock.length} label="Running low" className={lowStock.length > 0 ? "text-saffron" : "text-faint"} />
+            <Figure value={outOfStock.length} label="Out of stock" className={outOfStock.length > 0 ? "text-rose" : "text-faint"} />
+            <Figure value={hidden.length} label="Hidden from agent" className="text-faint" />
+          </div>
+        </div>
+      </section>
+
+      <div
+        className="rise glass mt-5 flex flex-wrap items-center gap-2 rounded-2xl p-2.5"
+        style={{ "--i": 2 } as React.CSSProperties}
+      >
+        <label className="relative min-w-[13rem] flex-1">
+          <SearchIcon className="text-faint pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search code, name or colour"
+            aria-label="Search products"
+            className="bg-surface-2 border-line focus:border-saffron placeholder:text-faint w-full rounded-xl border py-2 pr-3 pl-9 text-sm outline-none transition-colors"
+          />
+        </label>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {filters.map((option) => {
+            const on = filter === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setFilter(option.id)}
+                className={cn(
+                  "chip cursor-pointer transition-all hover:brightness-125",
+                  on ? "bg-surface-3 border-line-strong text-foreground" : option.tone,
+                  on && "shadow-[0_6px_18px_-10px_rgb(0_0_0/0.9)]",
+                )}
+              >
+                {option.label}
+                <span className="tnum opacity-70">{option.count}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <p className="text-muted-foreground mt-3 text-xs">
+      {visible.length === 0 ? (
+        <p
+          className="rise glass text-dim mt-5 rounded-2xl px-6 py-10 text-center text-sm"
+          style={{ "--i": 3 } as React.CSSProperties}
+        >
+          {products.length === 0
+            ? "No products yet. Add the first one — the agent cannot quote what is not here."
+            : "Nothing matches that filter."}
+        </p>
+      ) : (
+        <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {visible.map((product, index) => (
+            <ProductCard
+              key={product.id}
+              product={product}
+              index={Math.min(index, 9)}
+              anyPhotos={anyPhotos}
+              busy={pending && busyId === product.id}
+              disabled={pending}
+              onEdit={() => setEditing(product)}
+              onToggle={() =>
+                runRowAction(
+                  product.id,
+                  () => toggleActive(product.id, !product.active),
+                  product.active
+                    ? `${product.id} is hidden from the agent.`
+                    : `${product.id} is back on sale.`,
+                )
+              }
+              onDelete={() => setConfirming(product)}
+            />
+          ))}
+        </div>
+      )}
+
+      <p className="text-faint mt-6 max-w-[72ch] text-xs leading-relaxed">
         Deactivating keeps a product on past orders but stops the agent offering it. Deleting is only
         possible while nothing has ever been ordered.
         {anyPhotos
@@ -359,7 +478,7 @@ export function CatalogTable({ products }: { products: Product[] }) {
       </p>
 
       <Dialog open={editing !== null} onOpenChange={(open) => (open ? null : setEditing(null))}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
           {editing === null ? null : (
             <ProductForm
               key={editing === "new" ? "new" : editing.id}
@@ -379,12 +498,13 @@ export function CatalogTable({ products }: { products: Product[] }) {
             <AlertDialogTitle>Delete {confirming?.id}?</AlertDialogTitle>
             <AlertDialogDescription>
               {confirming?.name} disappears from the catalog for good. Nobody has ordered it, so
-              nothing else breaks - but if you only want it off sale, deactivate it instead.
+              nothing else breaks — but if you only want it off sale, deactivate it instead.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep it</AlertDialogCancel>
             <AlertDialogAction
+              variant="destructive"
               onClick={() => {
                 const target = confirming;
                 if (!target) return;
@@ -400,6 +520,156 @@ export function CatalogTable({ products }: { products: Product[] }) {
     </div>
   );
 }
+
+/* ----------------------------------------------------------------- the card */
+
+function ProductCard({
+  product,
+  index,
+  anyPhotos,
+  busy,
+  disabled,
+  onEdit,
+  onToggle,
+  onDelete,
+}: {
+  product: Product;
+  index: number;
+  anyPhotos: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onEdit: () => void;
+  onToggle: () => void;
+  onDelete: () => void;
+}) {
+  const tone = stockTone(product.stock);
+  const empty = product.active && product.stock === 0;
+
+  return (
+    <article
+      className={cn(
+        "rise glass glass-hover relative flex flex-col overflow-hidden rounded-2xl p-5 transition-opacity",
+        empty && "glow-rose",
+        !product.active && "opacity-60",
+        busy && "opacity-40",
+      )}
+      style={{ "--i": index + 3 } as React.CSSProperties}
+    >
+      <span
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-0.5 opacity-80"
+        style={{ background: product.active ? tone.accent : "var(--line-strong)" }}
+      />
+
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-faint font-mono text-[11px] tracking-wide">{product.id}</span>
+        <span className={cn("chip", product.active ? tone.chip : "chip-muted")}>
+          {empty ? <span className="breathe size-1.5 rounded-full bg-current" /> : null}
+          {product.active ? tone.label : "Hidden from agent"}
+        </span>
+      </div>
+
+      <h2 className="font-display mt-2 text-base leading-snug font-semibold tracking-tight">
+        {product.name}
+      </h2>
+      {product.name_si ? (
+        <p className="text-faint mt-0.5 text-xs" lang="si">
+          {product.name_si}
+        </p>
+      ) : null}
+
+      <p className="font-display tnum text-saffron mt-3 text-2xl leading-none font-semibold">
+        {lkr(product.price_lkr)}
+      </p>
+
+      {product.sizes.length > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center gap-1.5">
+          <span className="text-faint w-full text-[10px] tracking-[0.14em] uppercase">Sizes</span>
+          {product.sizes.map((size) => (
+            <span
+              key={size}
+              className="bg-surface-2 border-line tnum rounded-lg border px-2 py-0.5 text-xs"
+            >
+              {size}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {product.colours.length > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-faint w-full text-[10px] tracking-[0.14em] uppercase">Colours</span>
+          {product.colours.map((colour) => (
+            <span
+              key={colour}
+              className="bg-surface-2 border-line text-dim inline-flex items-center gap-1.5 rounded-lg border py-0.5 pr-2 pl-1.5 text-xs"
+            >
+              <ColourDot name={colour} />
+              {colour}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {product.sizes.length === 0 && product.colours.length === 0 ? (
+        <p className="text-faint mt-4 text-xs">No sizes or colours yet.</p>
+      ) : null}
+
+      <div className="border-line mt-5 flex items-center justify-between gap-2 border-t pt-3">
+        <span className="text-faint text-[11px]" title={product.updated_at}>
+          {product.updated_label}
+          {anyPhotos
+            ? product.photo_colours.length > 0
+              ? ` · ${product.photo_colours.length} photos`
+              : " · no photos"
+            : null}
+        </span>
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onEdit}
+            className="text-dim hover:text-foreground hover:bg-surface-2 cursor-pointer rounded-lg px-2.5 py-1 text-xs font-medium transition-colors"
+          >
+            Edit
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={`More actions for ${product.id}`}
+                className="text-faint hover:text-foreground hover:bg-surface-2 grid size-7 cursor-pointer place-items-center rounded-lg transition-colors"
+              >
+                <MoreHorizontalIcon className="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" onCloseAutoFocus={(event) => event.preventDefault()}>
+              <DropdownMenuItem disabled={disabled} onSelect={onToggle}>
+                {product.active ? "Deactivate" : "Activate"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {product.order_lines > 0 ? (
+                <>
+                  <DropdownMenuItem disabled>Delete</DropdownMenuItem>
+                  <DropdownMenuLabel className="text-faint max-w-56 text-xs font-normal whitespace-normal">
+                    On {product.order_lines} order line{product.order_lines === 1 ? "" : "s"} —
+                    deleting would break those orders. Deactivate instead.
+                  </DropdownMenuLabel>
+                </>
+              ) : (
+                <DropdownMenuItem variant="destructive" disabled={disabled} onSelect={onDelete}>
+                  Delete
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/* ----------------------------------------------------------------- the form */
 
 function ProductForm({ product, onDone }: { product: Product | null; onDone: () => void }) {
   const [id, setId] = useState(product?.id ?? "");
@@ -439,160 +709,224 @@ function ProductForm({ product, onDone }: { product: Product | null; onDone: () 
       }}
     >
       <DialogHeader>
-        <DialogTitle>{product === null ? "Add product" : `Edit ${product.id}`}</DialogTitle>
-        <DialogDescription>
+        <DialogTitle className="font-display text-lg font-semibold tracking-tight">
+          {product === null ? "Add product" : `Edit ${product.id}`}
+        </DialogTitle>
+        <DialogDescription className="text-dim">
           These are the numbers the agent quotes in WhatsApp. Saving takes effect on its next
           message.
         </DialogDescription>
       </DialogHeader>
 
-      <div className="my-4 space-y-4">
+      <div className="my-5 space-y-4">
         {error ? (
-          <p
-            role="alert"
-            className="border-destructive/50 bg-destructive/5 text-destructive rounded-md border px-3 py-2 text-sm"
-          >
+          <p role="alert" className="chip chip-rose w-full !rounded-xl !px-3 !py-2 !text-sm">
             {error}
           </p>
         ) : null}
 
-        <div className="grid gap-2">
-          <Label htmlFor="product-id">Product code</Label>
-          <Input
+        <div className="grid gap-1.5">
+          <label htmlFor="product-id" className="text-sm font-medium">
+            Product code
+          </label>
+          <input
             id="product-id"
             value={id}
             onChange={(event) => setId(event.target.value)}
             disabled={product !== null || pending}
             placeholder="TS-003"
             autoComplete="off"
-            className="font-mono"
+            className={cn(FIELD, "font-mono")}
           />
-          <p className="text-muted-foreground text-xs">
+          <p className="text-faint text-xs">
             {product === null
               ? "Letters, numbers, dots and dashes. Orders will point at this, so it cannot be changed afterwards."
               : "Orders reference this code, so it cannot be changed."}
           </p>
         </div>
 
-        <div className="grid gap-2">
-          <Label htmlFor="product-name">Name</Label>
-          <Input
+        <div className="grid gap-1.5">
+          <label htmlFor="product-name" className="text-sm font-medium">
+            Name
+          </label>
+          <input
             id="product-name"
             value={name}
             onChange={(event) => setName(event.target.value)}
             disabled={pending}
             placeholder="Plain Cotton T-Shirt"
+            className={FIELD}
           />
         </div>
 
-        <div className="grid gap-2">
-          <Label htmlFor="product-name-si">Sinhala name</Label>
-          <Input
+        <div className="grid gap-1.5">
+          <label htmlFor="product-name-si" className="text-sm font-medium">
+            Sinhala name
+          </label>
+          <input
             id="product-name-si"
             value={nameSi}
             onChange={(event) => setNameSi(event.target.value)}
             disabled={pending}
             lang="si"
             placeholder="Optional"
+            className={FIELD}
           />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <div className="grid gap-2">
-            <Label htmlFor="product-price">Price (LKR)</Label>
-            <Input
+          <div className="grid gap-1.5">
+            <label htmlFor="product-price" className="text-sm font-medium">
+              Price (LKR)
+            </label>
+            <input
               id="product-price"
               value={price}
               onChange={(event) => setPrice(event.target.value)}
               disabled={pending}
               inputMode="numeric"
               placeholder="1890"
-              className="tabular-nums"
+              className={cn(FIELD, "tnum text-saffron font-semibold")}
             />
-            <p className="text-muted-foreground text-xs">Whole rupees.</p>
+            <p className="text-faint text-xs">Whole rupees.</p>
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="product-stock">Stock</Label>
-            <Input
+          <div className="grid gap-1.5">
+            <label htmlFor="product-stock" className="text-sm font-medium">
+              Stock
+            </label>
+            <input
               id="product-stock"
               value={stock}
               onChange={(event) => setStock(event.target.value)}
               disabled={pending}
               inputMode="numeric"
               placeholder="0"
-              className="tabular-nums"
+              className={cn(
+                FIELD,
+                "tnum font-semibold",
+                willBeEmpty ? "text-rose border-rose/40" : "text-teal",
+              )}
             />
-            <p className={cn("text-xs", willBeEmpty ? "text-destructive" : "text-muted-foreground")}>
+            <p className={cn("text-xs", willBeEmpty ? "text-rose" : "text-faint")}>
               {willBeEmpty ? "At zero the agent refuses every order." : "Units on hand."}
             </p>
           </div>
         </div>
 
-        <div className="grid gap-2">
-          <Label htmlFor="product-sizes">Sizes</Label>
-          <Input
+        <div className="grid gap-1.5">
+          <label htmlFor="product-sizes" className="text-sm font-medium">
+            Sizes
+          </label>
+          <input
             id="product-sizes"
             value={sizes}
             onChange={(event) => setSizes(event.target.value)}
             disabled={pending}
             placeholder="S, M, L, XL"
+            className={FIELD}
           />
           <ListPreview raw={sizes} empty="No sizes yet. Separate them with commas." />
         </div>
 
-        <div className="grid gap-2">
-          <Label htmlFor="product-colours">Colours</Label>
-          <Input
+        <div className="grid gap-1.5">
+          <label htmlFor="product-colours" className="text-sm font-medium">
+            Colours
+          </label>
+          <input
             id="product-colours"
             value={colours}
             onChange={(event) => setColours(event.target.value)}
             disabled={pending}
             placeholder="Black, White, Navy"
+            className={FIELD}
           />
-          <ListPreview raw={colours} empty="No colours yet. Separate them with commas." />
+          <ListPreview
+            raw={colours}
+            empty="No colours yet. Separate them with commas."
+            swatches
+          />
         </div>
 
-        <div className="flex items-start justify-between gap-6 rounded-lg border p-3">
-          <div className="space-y-1">
+        <div className="bg-surface-2 border-line flex items-start justify-between gap-6 rounded-xl border p-3.5">
+          <div>
             <p className="text-sm font-medium">On sale</p>
-            <p className="text-muted-foreground text-sm">
+            <p className="text-dim mt-0.5 max-w-[42ch] text-sm leading-snug">
               Off means the agent stops offering it and stops quoting its price. Past orders keep it.
             </p>
           </div>
-          <Switch
-            checked={active}
-            onCheckedChange={setActive}
-            disabled={pending}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={active}
             aria-label="On sale"
-          />
+            disabled={pending}
+            onClick={() => setActive(!active)}
+            className={cn(
+              "relative h-7 w-12 shrink-0 cursor-pointer rounded-full transition-all disabled:opacity-50",
+              active ? "bg-teal shadow-[0_0_18px_-4px_var(--teal)]" : "bg-surface-3",
+            )}
+          >
+            <span
+              className={cn(
+                "absolute top-1 size-5 rounded-full bg-white transition-transform duration-200",
+                active ? "translate-x-6" : "translate-x-1",
+              )}
+            />
+          </button>
         </div>
       </div>
 
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onDone} disabled={pending}>
+        <button
+          type="button"
+          onClick={onDone}
+          disabled={pending}
+          className="text-dim hover:text-foreground hover:bg-surface-2 cursor-pointer rounded-xl px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-50"
+        >
           Cancel
-        </Button>
-        <Button type="submit" disabled={pending}>
-          {pending ? "Saving" : product === null ? "Add product" : "Save changes"}
-        </Button>
+        </button>
+        <button
+          type="submit"
+          disabled={pending}
+          className="bg-saffron cursor-pointer rounded-xl px-4 py-2.5 text-sm font-semibold text-[#1a1206] transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
+        >
+          {pending ? "Saving…" : product === null ? "Add product" : "Save changes"}
+        </button>
       </DialogFooter>
     </form>
   );
 }
 
 /** Shows exactly what the comma-separated text becomes once saved. */
-function ListPreview({ raw, empty }: { raw: string; empty: string }) {
+function ListPreview({
+  raw,
+  empty,
+  swatches = false,
+}: {
+  raw: string;
+  empty: string;
+  swatches?: boolean;
+}) {
   const values = parseList(raw);
+  if (values.length === 0) return <p className="text-faint text-xs">{empty}</p>;
+
+  if (swatches) {
+    return (
+      <p className="text-faint flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span>Saves as</span>
+        {values.map((value) => (
+          <span key={value} className="text-foreground inline-flex items-center gap-1.5">
+            <ColourDot name={value} className="size-2.5" />
+            {value}
+          </span>
+        ))}
+      </p>
+    );
+  }
+
   return (
-    <p className="text-muted-foreground text-xs">
-      {values.length === 0 ? (
-        empty
-      ) : (
-        <span>
-          Commas separate. Saves as{" "}
-          <span className="text-foreground">{values.join(" · ")}</span>
-        </span>
-      )}
+    <p className="text-faint text-xs">
+      Commas separate. Saves as <span className="text-foreground">{values.join(" · ")}</span>
     </p>
   );
 }
