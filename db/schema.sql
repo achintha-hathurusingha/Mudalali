@@ -96,6 +96,16 @@ create table if not exists pending_drafts (
 
 create index if not exists pending_drafts_status_idx on pending_drafts (status, created_at);
 
+-- Settings the shop owner can change at runtime. The agent overlays these on
+-- top of the .env defaults and re-reads them every few seconds, so the admin
+-- console can flip a switch without restarting or redeploying anything.
+create table if not exists settings (
+  key         text primary key,
+  value       text not null,
+  updated_at  timestamptz not null default now(),
+  updated_by  text
+);
+
 -- Additive migrations. Safe to re-run: `npm run db:setup` applies this whole
 -- file, and `create table if not exists` alone never adds a new column to a
 -- table that already exists.

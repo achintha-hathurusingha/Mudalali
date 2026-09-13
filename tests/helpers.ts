@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { newDb } from "pg-mem";
 import type pg from "pg";
 import { setPool } from "../src/memory/db.js";
+import { invalidateSettings } from "../src/memory/settings.js";
 import type { Channel, MessageHandler } from "../src/channel/types.js";
 import type { Understander, UnderstandInput, UnderstandResult } from "../src/understanding/types.js";
 import type { Understanding } from "../src/understanding/schema.js";
@@ -27,6 +28,8 @@ export async function useTestDb(): Promise<void> {
 
   const { Pool } = db.adapters.createPg();
   setPool(new Pool() as pg.Pool);
+  // Settings are cached in module scope; a stale cache would leak between tests.
+  invalidateSettings();
 }
 
 function esc(v: string): string {

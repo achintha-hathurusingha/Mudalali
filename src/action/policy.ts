@@ -1,4 +1,4 @@
-import { config } from "../config.js";
+import type { RuntimeSettings } from "../memory/settings.js";
 import type { Understanding } from "../understanding/schema.js";
 
 export type Decision =
@@ -12,7 +12,7 @@ export type Decision =
  */
 const ALWAYS_HUMAN = new Set(["bargaining", "complaint_return", "order_status"]);
 
-export function decide(u: Understanding): Decision {
+export function decide(u: Understanding, settings: RuntimeSettings): Decision {
   if (u.needsHuman || ALWAYS_HUMAN.has(u.intent)) {
     return {
       action: "escalate",
@@ -21,11 +21,11 @@ export function decide(u: Understanding): Decision {
     };
   }
 
-  if (u.confidence < config.minConfidence) {
+  if (u.confidence < settings.minConfidence) {
     return {
       action: "suggest",
       reply: u.draftReply,
-      reason: `low confidence (${u.confidence.toFixed(2)} < ${config.minConfidence})`,
+      reason: `low confidence (${u.confidence.toFixed(2)} < ${settings.minConfidence})`,
     };
   }
 
@@ -34,13 +34,13 @@ export function decide(u: Understanding): Decision {
     return { action: "suggest", reply: u.draftReply, reason: "order capture always needs confirmation" };
   }
 
-  if (config.mode === "auto" && config.autoIntents.includes(u.intent)) {
+  if (settings.mode === "auto" && settings.autoIntents.includes(u.intent)) {
     return { action: "auto_reply", reply: u.draftReply };
   }
 
   return {
     action: "suggest",
     reply: u.draftReply,
-    reason: config.mode === "suggest" ? "suggest-only mode" : `'${u.intent}' is not in AUTO_INTENTS`,
+    reason: settings.mode === "suggest" ? "suggest-only mode" : `'${u.intent}' is not in the auto list`,
   };
 }

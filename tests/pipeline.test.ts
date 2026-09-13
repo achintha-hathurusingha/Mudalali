@@ -6,6 +6,7 @@ import { useTestDb, FakeChannel, StubUnderstander, draftCode } from "./helpers.j
 import { createPipeline } from "../src/action/handler.js";
 import { config } from "../src/config.js";
 import { query } from "../src/memory/db.js";
+import { getSettings, setSetting } from "../src/memory/settings.js";
 import type { Understanding } from "../src/understanding/schema.js";
 
 const CUSTOMER = "94771111111@s.whatsapp.net";
@@ -619,5 +620,83 @@ describe("sending product photos", () => {
 
     assert.equal(channel.images.length, 0);
     assert.equal(channel.to(OPERATOR).length, 1, "the conversation still continues");
+  });
+});
+
+describe("runtime settings", () => {
+  test("defaults come from .env when the table is empty", async () => {
+    const s = await getSettings();
+    assert.equal(s.mode, "suggest", "the pinned test config");
+    assert.equal(s.paused, false);
+    assert.equal(s.minConfidence, 0.8);
+  });
+
+  test("a setting written to the database overrides the default", async () => {
+    await setSetting("mode", "auto", "console");
+    const s = await getSettings();
+    assert.equal(s.mode, "auto", "no restart, no redeploy");
+  });
+
+  test("switching to auto changes what the customer receives", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({
+      intent: "greeting",
+      confidence: 0.99,
+      draftReply: "Ayubowan!",
+    }));
+
+    // Suggest mode: held for approval.
+    await send({ jid: CUSTOMER, text: "hi", waMessageId: "S1" });
+    assert.equal(channel.to(CUSTOMER).length, 0);
+
+    // The shop owner flips the switch in the console.
+    await setSetting("mode", "auto", "owner");
+    channel.clear();
+
+    await send({ jid: CUSTOMER, text: "hello", waMessageId: "S2" });
+    assert.deepEqual(
+      channel.to(CUSTOMER).map((s) => s.text),
+      ["Ayubowan!"],
+      "the running process must pick the change up",
+    );
+  });
+
+  test("pausing records the message but sends nothing and calls no model", async () => {
+    const channel = new FakeChannel();
+    const { send, understander } = drive(channel, () => ({ draftReply: "should not be sent" }));
+
+    await setSetting("paused", "true", "owner");
+    await send({ jid: CUSTOMER, text: "t shirt thiyanawada?", waMessageId: "P1" });
+
+    assert.equal(channel.sent.length, 0, "nothing goes out while paused");
+    assert.equal(understander.calls, 0, "a paused shop should not be spending money");
+    const rows = await query<{ body: string }>(`select body from messages where direction = 'in'`);
+    assert.equal(rows.length, 1, "but the message is still recorded, not lost");
+  });
+
+  test("unpausing resumes without a restart", async () => {
+    const channel = new FakeChannel();
+    const { send, understander } = drive(channel, () => ({ draftReply: "Ow thiyenawa!" }));
+
+    await setSetting("paused", "true", "owner");
+    await send({ jid: CUSTOMER, text: "one", waMessageId: "U1" });
+    assert.equal(understander.calls, 0);
+
+    await setSetting("paused", "false", "owner");
+    await send({ jid: CUSTOMER, text: "two", waMessageId: "U2" });
+    assert.equal(understander.calls, 1);
+    assert.equal(channel.to(OPERATOR).length, 1);
+  });
+
+  test("a nonsense value falls back to the default instead of breaking the agent", async () => {
+    await setSetting("minConfidence", "not-a-number", "fat fingers");
+    const s = await getSettings();
+    assert.equal(s.minConfidence, 0.8, "the agent keeps running on the .env default");
+  });
+
+  test("a setting the agent does not know about is ignored, not fatal", async () => {
+    await query(`insert into settings (key, value) values ('somethingNewer', 'x')`);
+    const s = await getSettings();
+    assert.equal(s.mode, "suggest", "console and agent deploy independently");
   });
 });

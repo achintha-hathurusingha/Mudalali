@@ -15,6 +15,7 @@ import {
 import { createDraftOrder, renderOrder, renderProblems } from "../memory/orders.js";
 import { photosFor } from "../knowledge/photos.js";
 import { createDraft } from "../memory/drafts.js";
+import { getSettings } from "../memory/settings.js";
 import { decide } from "./policy.js";
 import { handleOperatorCommand, renderDraftForOperator, renderHandover } from "../human/operator.js";
 
@@ -70,7 +71,8 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
       return;
     }
 
-    if (config.debounceMs <= 0) {
+    const { debounceMs } = await getSettings();
+    if (debounceMs <= 0) {
       await process(
         inbound.jid,
         [inbound.text],
@@ -91,7 +93,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
       if (inbound.waMessageId) existing.waMessageIds.push(inbound.waMessageId);
       existing.pushName ??= inbound.pushName;
       existing.phone ??= inbound.phone;
-      existing.timer = setTimeout(() => void fire(inbound.jid), config.debounceMs);
+      existing.timer = setTimeout(() => void fire(inbound.jid), debounceMs);
       return;
     }
 
@@ -103,7 +105,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
       waMessageIds: inbound.waMessageId ? [inbound.waMessageId] : [],
       pushName: inbound.pushName,
       phone: inbound.phone,
-      timer: setTimeout(() => void fire(inbound.jid), config.debounceMs),
+      timer: setTimeout(() => void fire(inbound.jid), debounceMs),
       settled,
       resolve,
     });
@@ -147,6 +149,22 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
   ): Promise<void> {
     const text = texts.join("\n").trim();
     if (!text && media.length === 0) return;
+
+    const settings = await getSettings();
+
+    // The stop button. Messages are still recorded so nothing is lost and the
+    // console can show what came in, but nothing is sent and the model is not
+    // called - a paused shop should not be spending money either.
+    if (settings.paused) {
+      const { conversation } = await getOrCreateConversation(jid, pushName, phone);
+      await recordInbound({
+        conversationId: conversation.id,
+        body: text || `[${media[0]?.kind ?? "media"}]`,
+        waMessageId: waMessageIds[0],
+      });
+      log.warn({ jid }, "agent is paused - message recorded, nothing sent");
+      return;
+    }
 
     // Anything we cannot read must reach a person, never vanish.
     const blocked = mediaProblem(media, understander.capabilities);
@@ -247,7 +265,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
     // unanswered is what loses the sale.
     const sentPhotos = await sendRequestedPhotos(jid, u, conversation.id);
 
-    const decision = decide(u);
+    const decision = decide(u, settings);
     log.info(
       { jid, intent: u.intent, confidence: u.confidence, action: decision.action, ms: result.latencyMs },
       "handled",
@@ -255,7 +273,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
 
     // A misread photo is a worse failure than a misread sentence, so anything
     // carrying media waits for a person even when the intent is an auto one.
-    const holdForMedia = media.length > 0 && !config.autoReplyMedia;
+    const holdForMedia = media.length > 0 && !settings.autoReplyMedia;
 
     if (decision.action === "auto_reply") {
       if (!holdForMedia) {
@@ -294,7 +312,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
     // Escalation: the customer hears something immediately, then a human takes
     // over. Silence until the operator wakes up is how trust is lost.
     if (decision.action === "escalate") {
-      if (config.autoAckEscalations) {
+      if (settings.autoAckEscalations) {
         await channel.send(jid, decision.holdingReply);
         await saveOutbound(conversation.id, decision.holdingReply);
       }
@@ -307,7 +325,7 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
           incoming: storedBody ?? text,
           intent: u.intent,
           reason: decision.reason,
-          acknowledged: config.autoAckEscalations ? decision.holdingReply : null,
+          acknowledged: settings.autoAckEscalations ? decision.holdingReply : null,
           orderSummary,
         }),
       );

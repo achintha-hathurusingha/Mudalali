@@ -20,7 +20,8 @@
     "fixtures": "tsx tests/make-fixtures.ts",
     "test:media": "tsx tests/live-media.ts",
     "photos": "tsx tests/make-photos.ts",
-    "test:photos": "tsx tests/test-photos.ts"
+    "test:photos": "tsx tests/test-photos.ts",
+    "db:settings": "tsx scripts/seed-settings.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

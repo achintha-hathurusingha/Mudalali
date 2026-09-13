@@ -1,5 +1,5 @@
-import { config } from "../config.js";
 import { query, one } from "./db.js";
+import { getSettings } from "./settings.js";
 import { canonicalCity } from "../knowledge/business.js";
 import type { Understanding } from "../understanding/schema.js";
 import type { Turn } from "../understanding/types.js";
@@ -46,11 +46,12 @@ export async function getOrCreateConversation(
   return { customer, conversation };
 }
 
-export async function recentTurns(conversationId: number, limit = config.historyTurns): Promise<Turn[]> {
+export async function recentTurns(conversationId: number, limit?: number): Promise<Turn[]> {
+  const take = limit ?? (await getSettings()).historyTurns;
   const rows = await query<{ direction: "in" | "out"; body: string }>(
     `select direction, body from messages
       where conversation_id = $1 order by id desc limit $2`,
-    [conversationId, limit],
+    [conversationId, take],
   );
   return rows
     .reverse()
