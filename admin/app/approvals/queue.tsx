@@ -197,7 +197,7 @@ export function Queue({ drafts }: { drafts: Draft[] }) {
 
   return (
     <section aria-label="Drafts waiting for approval">
-      <div className="bg-background sticky top-0 z-10 -mx-1 mb-3 space-y-1 px-1 py-2">
+      <div className="bg-background sticky top-0 z-10 mb-3 space-y-1 py-2">
         <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <span className="text-foreground font-medium">
             {drafts.length} waiting
