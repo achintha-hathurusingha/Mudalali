@@ -8,6 +8,7 @@ import {
   type WASocket,
   type proto,
 } from "@whiskeysockets/baileys";
+import { readFileSync } from "node:fs";
 import type { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
@@ -291,6 +292,16 @@ export class BaileysChannel implements Channel {
       const sent = await this.socket!.sendMessage(jid, { text });
       if (sent?.key.id) this.ownSends.add(sent.key.id);
     }
+  }
+
+  async sendImage(jid: string, filePath: string, caption?: string): Promise<void> {
+    if (!this.socket) throw new Error("Channel not started");
+    if (!this.connected && !(await this.waitForConnection())) {
+      throw new Error("WhatsApp is not connected - the photo was not sent");
+    }
+    const image = readFileSync(filePath);
+    const sent = await this.socket.sendMessage(jid, caption ? { image, caption } : { image });
+    if (sent?.key.id) this.ownSends.add(sent.key.id);
   }
 
   async stop(): Promise<void> {

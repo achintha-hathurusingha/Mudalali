@@ -1,0 +1,20 @@
+{
+  "TS-001": {
+    "Black": "./data/product-photos/ts-001-black.jpg",
+    "White": "./data/product-photos/ts-001-white.jpg",
+    "Navy": "./data/product-photos/ts-001-navy.jpg",
+    "Maroon": "./data/product-photos/ts-001-maroon.jpg"
+  },
+  "TS-002": {
+    "Black": "./data/product-photos/ts-002-black.jpg",
+    "Beige": "./data/product-photos/ts-002-beige.jpg"
+  },
+  "DR-010": {
+    "Blue": "./data/product-photos/dr-010-blue.jpg",
+    "Red": "./data/product-photos/dr-010-red.jpg"
+  },
+  "DN-020": {
+    "Blue": "./data/product-photos/dn-020-blue.jpg",
+    "Black": "./data/product-photos/dn-020-black.jpg"
+  }
+}

@@ -93,6 +93,15 @@ export class ConsoleOperatorChannel implements Channel {
     await this.inner.send(jid, text);
   }
 
+  async sendImage(jid: string, filePath: string, caption?: string): Promise<void> {
+    if (isOperator(jid, this.operatorIdentities())) {
+      process.stdout.write(`\n[photo to you] ${filePath}${caption ? ` - ${caption}` : ""}\n`);
+      return;
+    }
+    if (!this.inner.sendImage) throw new Error(`${this.inner.name} cannot send photos`);
+    await this.inner.sendImage(jid, filePath, caption);
+  }
+
   async stop(): Promise<void> {
     if (this.watcher) clearInterval(this.watcher);
     this.watcher = null;

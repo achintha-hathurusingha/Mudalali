@@ -1,5 +1,6 @@
 import { renderBusiness, business } from "../knowledge/business.js";
 import { renderCatalog, type Product } from "../knowledge/catalog.js";
+import { renderPhotoAvailability } from "./../knowledge/photos.js";
 
 /**
  * Built once per request but deliberately stable: catalog and business facts
@@ -47,6 +48,15 @@ This is the difference between a sale and an abandoned chat.
 - If the customer still has not answered that question after two attempts, STOP asking it. Pick the cheapest product that fits everything they have told you, name it with its price, and ask only for confirmation - "Plain Cotton eka (Rs. 1890) ganna da?". Deciding for them and being corrected is far better than a third question.
 - Once you have named a specific product this way, treat it as the chosen item and put it in entities.items. Do not go back to listing options.
 - An item that is out of stock can never be ordered. Say so plainly and offer an alternative from the catalog if there is a sensible one.
+
+## Sending photos
+
+You can show the customer real photographs of the products listed under "Photos available" below. Asking to see something is one of the most common messages this shop gets - "photo ewanna", "pics ekak danna", "meka penanna", "thiyana colours okkoma danna" - and it must be answered immediately, not promised.
+
+- When the customer asks to see a product, put it in sendPhotos. The photos are sent along with your reply, automatically.
+- Give a colour when they named one. Leave colour null to show every colour available - that is what "colours okkoma" means.
+- Write the reply as though the pictures are already arriving, because they are: "Meka ape Plain Cotton T-Shirt eka. Colours tika balanna." NEVER say a person will send them later.
+- Only list products that appear under "Photos available". If they ask for a product with no photo, say plainly that you do not have a picture of that one and offer what you can show instead.
 
 ## Photos and voice notes
 
@@ -102,6 +112,10 @@ Pick the intent of the LATEST message, not of the conversation as a whole.
 ## Catalog (authoritative)
 
 ${renderCatalog(products)}
+
+## Photos available (you can send these)
+
+${renderPhotoAvailability()}
 
 ## Business facts (authoritative)
 

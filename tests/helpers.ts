@@ -38,10 +38,14 @@ export type Sent = { jid: string; text: string };
 export class FakeChannel implements Channel {
   readonly name = "fake";
   readonly sent: Sent[] = [];
+  readonly images: Array<{ jid: string; filePath: string; caption?: string }> = [];
 
   async start(_onMessage: MessageHandler): Promise<void> {}
   async send(jid: string, text: string): Promise<void> {
     this.sent.push({ jid, text });
+  }
+  async sendImage(jid: string, filePath: string, caption?: string): Promise<void> {
+    this.images.push({ jid, filePath, caption });
   }
   async stop(): Promise<void> {}
 
@@ -50,6 +54,7 @@ export class FakeChannel implements Channel {
   }
   clear(): void {
     this.sent.length = 0;
+    this.images.length = 0;
   }
 }
 
@@ -87,6 +92,7 @@ export const baseUnderstanding: Understanding = {
   needsHuman: false,
   needsHumanReason: null,
   draftReply: "Ow thiyenawa.",
+  sendPhotos: [],
   mediaSummary: null,
 };
 

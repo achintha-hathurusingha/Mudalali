@@ -13,6 +13,7 @@ import {
   rememberCustomerDetails,
 } from "../memory/repo.js";
 import { createDraftOrder, renderOrder, renderProblems } from "../memory/orders.js";
+import { photosFor } from "../knowledge/photos.js";
 import { createDraft } from "../memory/drafts.js";
 import { decide } from "./policy.js";
 import { handleOperatorCommand, renderDraftForOperator, renderHandover } from "../human/operator.js";
@@ -241,6 +242,11 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
       }
     }
 
+    // Photos the customer asked to see. Sent regardless of mode: showing a
+    // product is not a claim that needs approval, and "photo ewanna" going
+    // unanswered is what loses the sale.
+    const sentPhotos = await sendRequestedPhotos(jid, u, conversation.id);
+
     const decision = decide(u);
     log.info(
       { jid, intent: u.intent, confidence: u.confidence, action: decision.action, ms: result.latencyMs },
@@ -334,6 +340,42 @@ export function createPipeline(channel: Channel, understander: Understander): Pi
         orderId,
       }),
     );
+  }
+
+  /** Returns how many photos actually went out. */
+  async function sendRequestedPhotos(
+    jid: string,
+    u: { sendPhotos: Array<{ productId: string; colour: string | null }> },
+    conversationId: number,
+  ): Promise<number> {
+    if (u.sendPhotos.length === 0) return 0;
+    if (!channel.sendImage) {
+      log.warn({ channel: channel.name }, "photos requested but this channel cannot send them");
+      return 0;
+    }
+
+    let sent = 0;
+    const seen = new Set<string>();
+    for (const request of u.sendPhotos) {
+      for (const photo of photosFor(request.productId, request.colour)) {
+        if (seen.has(photo.path)) continue;
+        seen.add(photo.path);
+        try {
+          await channel.sendImage(jid, photo.path, photo.colour);
+          sent++;
+        } catch (error) {
+          log.error({ err: error, photo: photo.path }, "could not send a product photo");
+        }
+      }
+    }
+
+    if (sent > 0) {
+      await saveOutbound(conversationId, `[sent ${sent} product photo${sent === 1 ? "" : "s"}]`);
+      log.info({ jid, sent }, "sent product photos");
+    } else {
+      log.warn({ jid, requested: u.sendPhotos }, "photos were requested but none were found");
+    }
+    return sent;
   }
 
   return { handle, flush };

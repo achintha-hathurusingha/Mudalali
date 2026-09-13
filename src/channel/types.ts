@@ -38,6 +38,8 @@ export interface Channel {
   readonly name: string;
   start(onMessage: MessageHandler): Promise<void>;
   send(jid: string, text: string): Promise<void>;
+  /** Send a photo from disk. Channels that cannot are simply absent. */
+  sendImage?(jid: string, filePath: string, caption?: string): Promise<void>;
   stop(): Promise<void>;
   /**
    * Every identity that counts as the operator, including any @lid the channel

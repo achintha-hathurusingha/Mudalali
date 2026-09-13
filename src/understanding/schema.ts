@@ -81,6 +81,20 @@ export const UnderstandingSchema = z.object({
   draftReply: z
     .string()
     .describe("The reply to send the customer, in their own language and script. Short, warm, WhatsApp-length."),
+  sendPhotos: z
+    .array(
+      z.object({
+        productId: z.string().describe("Catalog id of the product to show, e.g. 'TS-001'."),
+        colour: z
+          .string()
+          .nullable()
+          .describe("A specific colour to show, or null to show every colour available."),
+      }),
+    )
+    .describe(
+      "Photos to send the customer. Fill this in whenever they ask to see a product - " +
+        "'photo ewanna', 'pics', 'can I see it', 'colours okkoma danna'. Empty otherwise.",
+    ),
   mediaSummary: z
     .string()
     .nullable()

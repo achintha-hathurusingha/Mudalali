@@ -557,3 +557,67 @@ describe("single-number setup", () => {
     );
   });
 });
+
+describe("sending product photos", () => {
+  test("a photo request sends the real files to the customer", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({
+      intent: "variant",
+      sendPhotos: [{ productId: "TS-001", colour: "Black" }],
+      draftReply: "Meka ape Plain Cotton T-Shirt eka. Balanna.",
+    }));
+
+    await send({ jid: CUSTOMER, text: "photo ewanna", waMessageId: "P1" });
+
+    assert.equal(channel.images.length, 1, "the customer must actually receive a picture");
+    assert.match(channel.images[0]!.filePath, /ts-001-black\.jpg$/);
+    assert.equal(channel.images[0]!.jid, CUSTOMER);
+  });
+
+  test("no colour means every colour we have", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({
+      intent: "variant",
+      sendPhotos: [{ productId: "TS-001", colour: null }],
+      draftReply: "Thiyana colours tika balanna.",
+    }));
+
+    await send({ jid: CUSTOMER, text: "thiyana colors okkoma danna", waMessageId: "P2" });
+
+    assert.equal(channel.images.length, 4, "TS-001 comes in four colours");
+    assert.deepEqual(
+      channel.images.map((i) => i.caption).sort(),
+      ["Black", "Maroon", "Navy", "White"],
+      "each photo is captioned with its colour",
+    );
+  });
+
+  test("photos are recorded as an outbound turn", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({
+      sendPhotos: [{ productId: "DR-010", colour: "Red" }],
+      draftReply: "Meka balanna.",
+    }));
+
+    await send({ jid: CUSTOMER, text: "dress eke pic ekak", waMessageId: "P3" });
+
+    const out = await query<{ body: string }>(`select body from messages where direction = 'out'`);
+    assert.ok(
+      out.some((r) => /sent 1 product photo/.test(r.body)),
+      "otherwise the model does not know the picture was already sent",
+    );
+  });
+
+  test("a product with no photo does not crash the turn", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({
+      sendPhotos: [{ productId: "NOPE-999", colour: null }],
+      draftReply: "Balanna.",
+    }));
+
+    await send({ jid: CUSTOMER, text: "photo", waMessageId: "P4" });
+
+    assert.equal(channel.images.length, 0);
+    assert.equal(channel.to(OPERATOR).length, 1, "the conversation still continues");
+  });
+});
