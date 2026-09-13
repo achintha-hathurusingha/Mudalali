@@ -162,11 +162,39 @@ Do not use a subagent for work needing back-and-forth — they start fresh with 
 
 ### Connectors (MCP)
 
+Already configured in this repo (`claude mcp list` to check):
+
 ```bash
-claude mcp add --transport stdio db -- npx -y @bytebase/dbhub --dsn "$DATABASE_URL"
-claude mcp add --transport stdio chrome -- npx -y chrome-devtools-mcp
-claude mcp list
+# Database - explore-only. dbhub.toml holds the DSN and is gitignored.
+claude mcp add --transport stdio db -- npx -y @bytebase/dbhub --transport stdio --config ./dbhub.toml
+
+# Browser - so Claude can see its own output
+claude mcp add --transport stdio chrome -- npx -y chrome-devtools-mcp@latest
 ```
+
+The `--readonly` flag DBHub used to take is gone; it wants a `dbhub.toml` now:
+
+```toml
+[[sources]]
+id = "mudalali"
+dsn = "postgres://mudalali_ro:...@...aivencloud.com:18648/defaultdb?sslmode=require"
+
+[[tools]]
+name = "execute_sql"
+source = "mudalali"
+readonly = true
+```
+
+Two layers of protection, deliberately: the `mudalali_ro` role has `SELECT` only — writes and DDL
+are refused by Postgres itself — **and** the tool is marked readonly. Schema changes go through
+`db/schema.sql` + `npm run db:setup`, so they stay in version control instead of being typed by an
+agent. The `dbhub` skill in `.claude/skills/` teaches the explore-then-query workflow.
+
+`npx -y` downloads on first run, which exceeds the 30s health-check timeout — run the package once
+by hand to warm the cache before adding it, or the first `claude mcp list` will show a false failure.
+
+Skipped: `@jpisnice/shadcn-ui-mcp-server` is currently broken on npm (`Cannot find module
+'./serial.js'`). Worth retrying later.
 
 | Connector | What it unlocks |
 |---|---|

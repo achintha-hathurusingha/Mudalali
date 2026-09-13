@@ -11,3 +11,6 @@ ca.pem
 # Pairing QR - a live credential while it is valid
 wa-login-qr.png
 operator-commands.txt
+
+# DBHub connector config - contains a database credential
+dbhub.toml
