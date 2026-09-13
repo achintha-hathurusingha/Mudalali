@@ -7,6 +7,7 @@ import { ConsoleChannel } from "./channel/console.js";
 import { ConsoleOperatorChannel } from "./channel/console-operator.js";
 import { createUnderstander } from "./understanding/index.js";
 import { createPipeline } from "./action/handler.js";
+import { startOutbox } from "./action/outbox.js";
 import type { Channel } from "./channel/types.js";
 
 async function main(): Promise<void> {
@@ -28,8 +29,13 @@ async function main(): Promise<void> {
   const pipeline = createPipeline(channel, understander);
   await channel.start(pipeline.handle);
 
+  // Decisions taken in the admin console have no way to reach WhatsApp on their
+  // own; this is what puts them on the wire.
+  const stopOutbox = startOutbox(channel);
+
   const shutdown = async (signal: string) => {
     log.info({ signal }, "shutting down");
+    stopOutbox();
     await pipeline.flush();
     await channel.stop();
     await closeDb();

@@ -7,6 +7,8 @@ import { createPipeline } from "../src/action/handler.js";
 import { config } from "../src/config.js";
 import { query } from "../src/memory/db.js";
 import { getSettings, setSetting } from "../src/memory/settings.js";
+import { resolveDraft } from "../src/memory/drafts.js";
+import { startOutbox } from "../src/action/outbox.js";
 import type { Understanding } from "../src/understanding/schema.js";
 
 const CUSTOMER = "94771111111@s.whatsapp.net";
@@ -698,5 +700,80 @@ describe("runtime settings", () => {
     await query(`insert into settings (key, value) values ('somethingNewer', 'x')`);
     const s = await getSettings();
     assert.equal(s.mode, "suggest", "console and agent deploy independently");
+  });
+});
+
+describe("delivering console approvals", () => {
+  test("a draft approved in the console is sent to the customer", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({ draftReply: "Ow thiyenawa!" }));
+
+    await send({ jid: CUSTOMER, text: "thiyanawada?", waMessageId: "O1" });
+    const code = draftCode(channel.to(OPERATOR)[0]!.text);
+    channel.clear();
+
+    // What the console does: records the decision, cannot send.
+    await resolveDraft(code, "sent");
+    const stop = startOutbox(channel, 60_000);
+    await new Promise((r) => setTimeout(r, 50));
+    stop();
+
+    assert.deepEqual(
+      channel.to(CUSTOMER).map((s) => s.text),
+      ["Ow thiyenawa!"],
+      "otherwise approving in the console is a dead end and the customer hears nothing",
+    );
+  });
+
+  test("a reply already sent over WhatsApp is never sent twice", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({ draftReply: "Ow thiyenawa!" }));
+
+    await send({ jid: CUSTOMER, text: "thiyanawada?", waMessageId: "O2" });
+    const code = draftCode(channel.to(OPERATOR)[0]!.text);
+
+    await send({ jid: OPERATOR, text: `ok ${code}` });
+    assert.equal(channel.to(CUSTOMER).length, 1);
+    channel.clear();
+
+    const stop = startOutbox(channel, 60_000);
+    await new Promise((r) => setTimeout(r, 50));
+    stop();
+
+    assert.equal(channel.to(CUSTOMER).length, 0, "the WhatsApp path already delivered it");
+  });
+
+  test("a skipped draft is never delivered", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({ draftReply: "should stay unsent" }));
+
+    await send({ jid: CUSTOMER, text: "thiyanawada?", waMessageId: "O3" });
+    const code = draftCode(channel.to(OPERATOR)[0]!.text);
+    channel.clear();
+
+    await resolveDraft(code, "skipped");
+    const stop = startOutbox(channel, 60_000);
+    await new Promise((r) => setTimeout(r, 50));
+    stop();
+
+    assert.equal(channel.to(CUSTOMER).length, 0, "a skip is a decision to say nothing");
+  });
+
+  test("nothing is delivered while the shop is paused", async () => {
+    const channel = new FakeChannel();
+    const { send } = drive(channel, () => ({ draftReply: "Ow thiyenawa!" }));
+
+    await send({ jid: CUSTOMER, text: "thiyanawada?", waMessageId: "O4" });
+    const code = draftCode(channel.to(OPERATOR)[0]!.text);
+    channel.clear();
+
+    await resolveDraft(code, "sent");
+    await setSetting("paused", "true", "owner");
+
+    const stop = startOutbox(channel, 60_000);
+    await new Promise((r) => setTimeout(r, 50));
+    stop();
+
+    assert.equal(channel.to(CUSTOMER).length, 0, "the stop button must stop this too");
   });
 });

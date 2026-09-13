@@ -113,3 +113,19 @@ alter table messages add column if not exists media_kind text;
 alter table orders   add column if not exists customer_name text;
 alter table orders   add column if not exists phone text;
 alter table pending_drafts add column if not exists order_id int references orders(id) on delete set null;
+
+-- When a decision was actually put on the wire. The WhatsApp command path sends
+-- immediately and stamps this; the admin console only records the decision, so
+-- it leaves this null and the agent's outbox picks the row up.
+alter table pending_drafts add column if not exists delivered_at timestamptz;
+
+-- Rows resolved before this column existed were already delivered over
+-- WhatsApp. Without this backfill the outbox would re-send every one of them.
+update pending_drafts
+   set delivered_at = resolved_at
+ where delivered_at is null
+   and status in ('sent', 'edited')
+   and resolved_at is not null;
+
+create index if not exists pending_drafts_outbox_idx
+  on pending_drafts (status, delivered_at) where delivered_at is null;

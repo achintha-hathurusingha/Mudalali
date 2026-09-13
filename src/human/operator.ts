@@ -149,7 +149,7 @@ export async function handleOperatorCommand(text: string, channel: Channel): Pro
       return true;
     }
     await saveOutbound(draft.conversation_id, draft.draft_reply);
-    await resolveDraft(code, "sent");
+    await resolveDraft(code, "sent", true);
 
     // Approving the confirmation reply is what makes the order real - but only
     // when there is somewhere to ship it to.
@@ -194,7 +194,7 @@ export async function handleOperatorCommand(text: string, channel: Channel): Pro
     if (draft) {
       await channel.send(draft.customer_jid, replacement);
       await saveOutbound(draft.conversation_id, replacement);
-      await resolveDraft(code, "edited");
+      await resolveDraft(code, "edited", true);
       await channel.send(config.operatorJid, `Sent your version of ${code}.`);
       log.info({ code }, "operator edited draft");
       return true;
