@@ -9,22 +9,29 @@ const LINKS = [
 ];
 
 /**
- * The ledger's masthead. Ruled underneath, like the header of an account book,
- * with the current page inked rather than boxed.
+ * Floating glass bar. The active route is filled rather than underlined, so it
+ * reads at a glance on a phone held at arm's length behind a counter.
  */
 export function Nav({ current }: { current: string }) {
   return (
-    <header className="border-rule-strong mb-10 flex flex-wrap items-end justify-between gap-x-8 gap-y-3 border-b pb-3">
-      <div className="flex items-baseline gap-3">
-        <Link href="/settings" className="font-display text-2xl leading-none tracking-tight">
-          Mudalali
-        </Link>
-        <span className="text-ink-faint text-sm leading-none" lang="si">
-          මුදලාලි
+    <header className="rise mb-10 flex flex-wrap items-center justify-between gap-4">
+      <Link href="/settings" className="group flex items-center gap-3">
+        <span
+          className="grid size-9 place-items-center rounded-xl text-sm font-bold text-[#1a1206]"
+          style={{ background: "var(--grad-money)" }}
+          aria-hidden
+        >
+          ම
         </span>
-      </div>
+        <span className="leading-tight">
+          <span className="font-display block text-[15px] font-600 tracking-tight">Mudalali</span>
+          <span className="text-faint block text-[11px]" lang="si">
+            මුදලාලි
+          </span>
+        </span>
+      </Link>
 
-      <nav className="flex flex-wrap items-center gap-x-5 gap-y-1">
+      <nav className="glass flex items-center gap-1 rounded-full p-1">
         {LINKS.map((link) => {
           const active = link.href === current;
           return (
@@ -34,18 +41,18 @@ export function Nav({ current }: { current: string }) {
               aria-current={active ? "page" : undefined}
               className={
                 active
-                  ? "decoration-stop text-ink text-sm font-medium underline decoration-2 underline-offset-[7px]"
-                  : "text-ink-soft hover:text-ink text-sm transition-colors"
+                  ? "bg-surface-3 text-foreground rounded-full px-3.5 py-1.5 text-sm font-medium shadow-sm"
+                  : "text-dim hover:text-foreground hover:bg-surface-2 rounded-full px-3.5 py-1.5 text-sm transition-colors"
               }
             >
               {link.label}
             </Link>
           );
         })}
-        <form action={signOut} className="ml-2">
+        <form action={signOut}>
           <button
             type="submit"
-            className="text-ink-faint hover:text-ink cursor-pointer text-sm transition-colors"
+            className="text-faint hover:text-rose cursor-pointer rounded-full px-3 py-1.5 text-sm transition-colors"
           >
             Sign out
           </button>

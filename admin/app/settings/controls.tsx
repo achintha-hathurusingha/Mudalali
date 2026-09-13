@@ -20,36 +20,44 @@ function useSetting(key: SettingKey) {
   return { save, pending };
 }
 
-/* ---------------------------------------------------------------- the row */
+/* ------------------------------------------------------------------ shells */
 
-/**
- * One ruled line of the ledger: name in the margin, value in the field.
- * Every setting uses this shape, so the page reads as one column of figures
- * rather than a stack of unrelated boxes.
- */
-function Row({
-  name,
-  help,
+export function Panel({
+  title,
+  hint,
+  i = 0,
   children,
 }: {
-  name: string;
-  help: string;
+  title: string;
+  hint?: string;
+  i?: number;
   children: ReactNode;
 }) {
   return (
-    <div className="rule-row grid grid-cols-[1fr_auto] items-baseline gap-x-6 gap-y-1 py-4">
-      <div>
-        <p className="text-[0.9375rem] leading-snug font-medium">{name}</p>
-        <p className="text-ink-soft mt-0.5 max-w-[52ch] text-sm leading-snug">{help}</p>
+    <section className="rise glass rounded-2xl p-5 sm:p-6" style={{ "--i": i } as React.CSSProperties}>
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-display text-base font-semibold tracking-tight">{title}</h2>
+        {hint ? <p className="text-faint text-xs">{hint}</p> : null}
       </div>
-      <div className="figures justify-self-end">{children}</div>
+      <div className="divide-line mt-3 divide-y">{children}</div>
+    </section>
+  );
+}
+
+function Row({ name, help, children }: { name: string; help: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2 py-4 first:pt-0 last:pb-0">
+      <div className="min-w-0 flex-1">
+        <p className="text-[0.9375rem] leading-snug font-medium">{name}</p>
+        <p className="text-dim mt-0.5 max-w-[54ch] text-sm leading-snug">{help}</p>
+      </div>
+      <div className="shrink-0">{children}</div>
     </div>
   );
 }
 
 /* -------------------------------------------------------------- the state */
 
-/** The one loud thing on the page: what the shop is doing right now. */
 export function ShopState({
   paused,
   mode,
@@ -62,30 +70,50 @@ export function ShopState({
   const [isPaused, setPaused] = useState(paused);
   const { save, pending } = useSetting("paused");
 
+  const live = !isPaused;
   const headline = isPaused
     ? "Nobody is being answered."
     : mode === "auto"
-      ? `Answering ${autoCount} kind${autoCount === 1 ? "" : "s"} of message on its own.`
+      ? `Answering ${autoCount} kinds of message on its own.`
       : "Every reply is waiting for you.";
 
-  const sub = isPaused
-    ? "Messages still arrive and are recorded. Nothing goes back out."
-    : mode === "auto"
-      ? "Orders, bargaining and complaints still come to you."
-      : "Nothing reaches a customer until you approve it.";
-
   return (
-    <section className="border-rule-strong mb-12 border-b pb-8">
-      <h1
-        className={cn(
-          "font-display max-w-[18ch] text-4xl leading-[1.05] tracking-tight sm:text-5xl",
-          isPaused && "text-stop",
-        )}
-      >
-        {headline}
-      </h1>
-      <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2">
-        <p className="text-ink-soft max-w-[46ch] text-sm">{sub}</p>
+    <section
+      className={cn(
+        "rise glass relative overflow-hidden rounded-3xl p-6 sm:p-8",
+        isPaused && "glow-rose",
+      )}
+      style={{ "--i": 1 } as React.CSSProperties}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-24 -right-16 size-72 rounded-full opacity-25 blur-3xl"
+        style={{ background: isPaused ? "var(--rose)" : "var(--grad-agent)" }}
+      />
+
+      <div className="relative">
+        <span className={cn("chip", live ? "chip-teal" : "chip-rose")}>
+          <span className={cn("size-1.5 rounded-full bg-current", live && "breathe")} />
+          {live ? "Live" : "Stopped"}
+        </span>
+
+        <h1
+          className={cn(
+            "font-display mt-4 max-w-[20ch] text-[1.75rem] leading-[1.12] font-semibold tracking-tight sm:text-4xl",
+            isPaused ? "text-rose" : "text-grad-agent",
+          )}
+        >
+          {headline}
+        </h1>
+
+        <p className="text-dim mt-3 max-w-[52ch] text-sm">
+          {isPaused
+            ? "Messages still arrive and are recorded. Nothing goes back out until you start again."
+            : mode === "auto"
+              ? "Orders, bargaining and complaints still come to you."
+              : "Nothing reaches a customer until you approve it."}
+        </p>
+
         <button
           type="button"
           disabled={pending}
@@ -95,10 +123,10 @@ export function ShopState({
             save(String(next), next ? "Stopped. Nothing is going out." : "Replying again.");
           }}
           className={cn(
-            "cursor-pointer border-b-2 pb-0.5 text-sm font-medium transition-colors disabled:opacity-50",
+            "mt-6 cursor-pointer rounded-xl px-5 py-2.5 text-sm font-semibold transition-all active:scale-[0.98] disabled:opacity-50",
             isPaused
-              ? "border-settled text-settled hover:border-ink hover:text-ink"
-              : "border-stop text-stop hover:border-ink hover:text-ink",
+              ? "bg-teal glow-teal text-[#04201c] hover:brightness-110"
+              : "bg-rose glow-rose text-white hover:brightness-110",
           )}
         >
           {isPaused ? "Start replying" : "Stop replying"}
@@ -121,7 +149,7 @@ export function ModeControl({ mode }: { mode: string }) {
 
   return (
     <Row name="Reply mode" help="Suggest is where to start. Move to Auto once you trust what you have been approving.">
-      <div className="flex items-baseline gap-5">
+      <div className="bg-surface-2 border-line inline-flex rounded-xl border p-1">
         {options.map((option) => {
           const on = value === option.id;
           return (
@@ -129,21 +157,19 @@ export function ModeControl({ mode }: { mode: string }) {
               key={option.id}
               type="button"
               disabled={pending}
+              title={option.note}
               onClick={() => {
                 setValue(option.id);
                 save(option.id, `Reply mode is ${option.label}.`);
               }}
-              className="cursor-pointer text-right disabled:opacity-50"
+              className={cn(
+                "cursor-pointer rounded-lg px-3.5 py-1.5 text-sm font-medium transition-all disabled:opacity-50",
+                on
+                  ? "bg-saffron text-[#1a1206] shadow-[0_6px_20px_-8px_var(--saffron)]"
+                  : "text-dim hover:text-foreground",
+              )}
             >
-              <span
-                className={cn(
-                  "block text-[0.9375rem] transition-colors",
-                  on ? "border-ink border-b-2 pb-0.5 font-medium" : "text-ink-faint hover:text-ink",
-                )}
-              >
-                {option.label}
-              </span>
-              {on ? <span className="text-ink-soft mt-1 block text-xs">{option.note}</span> : null}
+              {option.label}
             </button>
           );
         })}
@@ -159,17 +185,17 @@ export function AutoIntentsControl({ selected }: { selected: string[] }) {
   const toggle = (intent: string) => {
     const next = value.includes(intent) ? value.filter((i) => i !== intent) : [...value, intent];
     setValue(next);
-    save(next.join(","), `${label(intent)} ${next.includes(intent) ? "answers itself" : "comes to you"}.`);
+    save(next.join(","), `${nice(intent)} ${next.includes(intent) ? "answers itself" : "comes to you"}.`);
   };
 
   return (
-    <div className="rule-row py-4">
+    <div className="py-4 first:pt-0 last:pb-0">
       <p className="text-[0.9375rem] font-medium">Which messages may answer themselves</p>
-      <p className="text-ink-soft mt-0.5 max-w-[58ch] text-sm leading-snug">
-        Only in Auto mode. The three struck through always reach you — those are relationship
-        moments, not classification problems.
+      <p className="text-dim mt-0.5 max-w-[58ch] text-sm leading-snug">
+        Only in Auto mode. The three in rose always reach you — those are relationship moments, not
+        classification problems.
       </p>
-      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+      <div className="mt-3 flex flex-wrap gap-2">
         {INTENTS.map((intent) => {
           const locked = (NEVER_AUTOMATED as readonly string[]).includes(intent);
           const on = value.includes(intent) && !locked;
@@ -181,13 +207,14 @@ export function AutoIntentsControl({ selected }: { selected: string[] }) {
               onClick={() => toggle(intent)}
               title={locked ? "Always handled by a person" : undefined}
               className={cn(
-                "text-[0.9375rem] transition-colors",
-                locked && "text-ink-faint cursor-not-allowed line-through",
-                !locked && on && "border-settled cursor-pointer border-b-2 pb-0.5 font-medium",
-                !locked && !on && "text-ink-faint hover:text-ink cursor-pointer",
+                "chip transition-all",
+                locked && "chip-rose cursor-not-allowed opacity-70",
+                !locked && on && "chip-teal cursor-pointer hover:brightness-125",
+                !locked && !on && "chip-muted cursor-pointer hover:brightness-125",
               )}
             >
-              {label(intent)}
+              {on ? <span className="bg-teal size-1.5 rounded-full" /> : null}
+              {nice(intent)}
             </button>
           );
         })}
@@ -196,7 +223,7 @@ export function AutoIntentsControl({ selected }: { selected: string[] }) {
   );
 }
 
-function label(intent: string): string {
+function nice(intent: string): string {
   return intent.replace(/_/g, " ");
 }
 
@@ -205,15 +232,11 @@ export function ToggleControl({
   name,
   help,
   value,
-  onWord = "yes",
-  offWord = "no",
 }: {
   settingKey: SettingKey;
   name: string;
   help: string;
   value: boolean;
-  onWord?: string;
-  offWord?: string;
 }) {
   const [on, setOn] = useState(value);
   const { save, pending } = useSetting(settingKey);
@@ -222,18 +245,25 @@ export function ToggleControl({
     <Row name={name} help={help}>
       <button
         type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={name}
         disabled={pending}
-        aria-pressed={on}
         onClick={() => {
           setOn(!on);
-          save(String(!on), `${name}: ${!on ? onWord : offWord}.`);
+          save(String(!on), `${name}: ${!on ? "on" : "off"}.`);
         }}
         className={cn(
-          "min-w-[4ch] cursor-pointer border-b-2 pb-0.5 text-[0.9375rem] font-medium transition-colors disabled:opacity-50",
-          on ? "border-settled text-settled" : "border-rule-strong text-ink-faint hover:text-ink",
+          "relative h-7 w-12 cursor-pointer rounded-full transition-all disabled:opacity-50",
+          on ? "bg-teal shadow-[0_0_18px_-4px_var(--teal)]" : "bg-surface-3",
         )}
       >
-        {on ? onWord : offWord}
+        <span
+          className={cn(
+            "absolute top-1 size-5 rounded-full bg-white transition-transform duration-200",
+            on ? "translate-x-6" : "translate-x-1",
+          )}
+        />
       </button>
     </Row>
   );
@@ -274,7 +304,7 @@ export function NumberControl({
 
   return (
     <Row name={name} help={help}>
-      <span className="inline-flex items-baseline gap-1.5">
+      <span className="bg-surface-2 border-line focus-within:border-saffron inline-flex items-baseline gap-1.5 rounded-xl border px-3 py-1.5 transition-colors">
         <input
           type="number"
           inputMode="decimal"
@@ -289,9 +319,9 @@ export function NumberControl({
           onKeyDown={(e) => {
             if (e.key === "Enter") e.currentTarget.blur();
           }}
-          className="border-rule-strong focus:border-ink w-[6ch] border-b-2 bg-transparent pb-0.5 text-right text-[0.9375rem] font-medium tabular-nums outline-none disabled:opacity-50"
+          className="tnum text-saffron w-[5ch] bg-transparent text-right text-[0.9375rem] font-semibold outline-none"
         />
-        {unit ? <span className="text-ink-faint text-sm">{unit}</span> : null}
+        {unit ? <span className="text-faint text-xs">{unit}</span> : null}
       </span>
     </Row>
   );

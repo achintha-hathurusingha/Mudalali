@@ -1,25 +1,23 @@
 import type { Metadata } from "next";
-import { Instrument_Serif, IBM_Plex_Sans, Noto_Sans_Sinhala } from "next/font/google";
+import { Sora, Plus_Jakarta_Sans, Noto_Sans_Sinhala } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 /**
- * Two voices, deliberately distinct: a high-contrast serif that only ever
- * speaks in headings and figures, and a workmanlike sans for everything the
- * owner actually reads. Sinhala sits in the same stack as the sans so it
- * resolves without reading as a third family.
+ * Sora carries headings and figures — geometric, a little unusual, and it holds
+ * up at display size. Plus Jakarta Sans does the reading work. Sinhala sits in
+ * the same stack as the body face so it never reads as a third voice.
  */
-const display = Instrument_Serif({
+const display = Sora({
   variable: "--font-display",
   subsets: ["latin"],
-  weight: "400",
-  style: ["normal", "italic"],
+  weight: ["500", "600", "700"],
 });
 
-const sans = IBM_Plex_Sans({
-  variable: "--font-plex",
+const body = Plus_Jakarta_Sans({
+  variable: "--font-body",
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700"],
 });
 
 const sinhala = Noto_Sans_Sinhala({
@@ -37,11 +35,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body
-        className={`${display.variable} ${sans.variable} ${sinhala.variable} antialiased`}
-        style={{ fontFamily: "var(--font-plex), var(--font-sinhala), system-ui, sans-serif" }}
+        className={`${display.variable} ${body.variable} ${sinhala.variable} antialiased`}
+        style={{ fontFamily: "var(--font-body), var(--font-sinhala), system-ui, sans-serif" }}
       >
         {children}
-        <Toaster position="bottom-right" />
+        <Toaster position="bottom-right" theme="dark" richColors />
       </body>
     </html>
   );
