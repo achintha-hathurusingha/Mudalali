@@ -40,6 +40,11 @@ export interface Channel {
   send(jid: string, text: string): Promise<void>;
   /** Send a photo from disk. Channels that cannot are simply absent. */
   sendImage?(jid: string, filePath: string, caption?: string): Promise<void>;
+  /**
+   * Send a file from disk as a document - a PDF invoice, a size chart. Unlike
+   * an image this keeps its filename, which is the whole point for a receipt.
+   */
+  sendDocument?(jid: string, filePath: string, fileName?: string, caption?: string): Promise<void>;
   stop(): Promise<void>;
   /**
    * Every identity that counts as the operator, including any @lid the channel

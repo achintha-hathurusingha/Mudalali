@@ -9,12 +9,35 @@ import {
   type proto,
 } from "@whiskeysockets/baileys";
 import { readFileSync } from "node:fs";
+import { basename, extname } from "node:path";
 import type { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import { config } from "../config.js";
 import { log, silentLogger } from "../log.js";
 import type { Attachment, Channel, MessageHandler } from "./types.js";
+
+/**
+ * WhatsApp shows a document's icon and preview from its mimetype, so a PDF sent
+ * as octet-stream arrives as an unhelpful blank file. Only the handful of types
+ * a shop actually sends are worth naming; anything else is still deliverable.
+ */
+const DOCUMENT_MIME_TYPES: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".csv": "text/csv",
+  ".txt": "text/plain",
+  ".doc": "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+};
+
+function mimeTypeFor(fileName: string): string {
+  return DOCUMENT_MIME_TYPES[extname(fileName).toLowerCase()] ?? "application/octet-stream";
+}
 
 /**
  * Peels off the containers WhatsApp wraps real content in. Without this a photo
@@ -301,6 +324,27 @@ export class BaileysChannel implements Channel {
     }
     const image = readFileSync(filePath);
     const sent = await this.socket.sendMessage(jid, caption ? { image, caption } : { image });
+    if (sent?.key.id) this.ownSends.add(sent.key.id);
+  }
+
+  async sendDocument(
+    jid: string,
+    filePath: string,
+    fileName?: string,
+    caption?: string,
+  ): Promise<void> {
+    if (!this.socket) throw new Error("Channel not started");
+    if (!this.connected && !(await this.waitForConnection())) {
+      throw new Error("WhatsApp is not connected - the file was not sent");
+    }
+    const document = readFileSync(filePath);
+    const name = fileName?.trim() || basename(filePath);
+    const sent = await this.socket.sendMessage(jid, {
+      document,
+      fileName: name,
+      mimetype: mimeTypeFor(name),
+      ...(caption ? { caption } : {}),
+    });
     if (sent?.key.id) this.ownSends.add(sent.key.id);
   }
 

@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { basename } from "node:path";
 import type { Channel } from "../channel/types.js";
 import { config } from "../config.js";
 import { getPendingDraft, resolveDraft, listPendingDrafts } from "../memory/drafts.js";
@@ -68,9 +70,36 @@ const HELP = [
   "  skip <code>          send nothing",
   "  pending              list drafts still waiting",
   "  msg <phone> <text>   message a customer through the bot",
+  "  file <phone|jid> <path> [| caption]   send a PDF or other file through the bot",
   "  confirm <order id>   mark a draft order confirmed",
   "  cancel <order id>    cancel a draft order",
 ].join("\n");
+
+/**
+ * An operator addresses someone by phone or by raw JID. Phone is preferred - it
+ * finds the conversation, so the send is recorded against it - but on Baileys 7
+ * a customer arrives as an @lid whose real number is often never learned, and
+ * those can only be reached by the JID itself.
+ */
+async function resolveRecipient(
+  target: string,
+): Promise<{ jid: string; customerId?: number } | null> {
+  if (target.includes("@")) {
+    // findCustomerByPhone also matches on the JID prefix, so the local part
+    // finds an @lid customer whose real number was never learned. Without this
+    // a file sent by JID would go out unrecorded.
+    const local = target.split("@")[0]!.split(":")[0]!;
+    const byJid = await findCustomerByPhone(local);
+    return { jid: target, customerId: byJid?.id };
+  }
+
+  const digits = target.replace(/\D/g, "");
+  if (digits.length < 7) return null;
+
+  const customer = await findCustomerByPhone(digits);
+  if (customer) return { jid: customer.wa_jid, customerId: customer.id };
+  return { jid: `${digits}@s.whatsapp.net` };
+}
 
 /**
  * Returns true when the message was an operator command (and was handled).
@@ -126,6 +155,56 @@ export async function handleOperatorCommand(text: string, channel: Channel): Pro
     const conversation = await openConversationFor(customer.id);
     if (conversation) await saveOutbound(conversation.id, body);
     await channel.send(config.operatorJid, `Sent to ${phone}.`);
+    return true;
+  }
+
+  // file 94771234567 C:\invoices\order-41.pdf | Your invoice
+  // file 208151848742972@lid ./report.pdf
+  const fileMatch = /^(?:file|pdf|doc)\s+(\S+)\s+([\s\S]+)$/i.exec(trimmed);
+  if (fileMatch) {
+    const target = fileMatch[1]!;
+    // The path may contain spaces, so the caption is split off on a pipe
+    // rather than by guessing where the filename ends.
+    const [rawPath, ...captionParts] = fileMatch[2]!.split("|");
+    const filePath = rawPath!.trim();
+    const caption = captionParts.join("|").trim() || undefined;
+
+    if (!channel.sendDocument) {
+      await channel.send(config.operatorJid, `${channel.name} cannot send files.`);
+      return true;
+    }
+    if (!existsSync(filePath)) {
+      await channel.send(config.operatorJid, `No file at ${filePath}.`);
+      return true;
+    }
+
+    const recipient = await resolveRecipient(target);
+    if (!recipient) {
+      await channel.send(config.operatorJid, `Could not work out who ${target} is.`);
+      return true;
+    }
+
+    const name = basename(filePath);
+    try {
+      await channel.sendDocument(recipient.jid, filePath, name, caption);
+    } catch (error) {
+      await channel.send(
+        config.operatorJid,
+        `Could not send ${name}: ${(error as Error).message}`,
+      );
+      return true;
+    }
+
+    // Recorded so the conversation history shows the file went out, the same
+    // way a photo send is recorded.
+    if (recipient.customerId) {
+      const conversation = await openConversationFor(recipient.customerId);
+      const note = `[sent file ${name}]${caption ? ` ${caption}` : ""}`;
+      if (conversation) await saveOutbound(conversation.id, note);
+    }
+
+    log.info({ to: recipient.jid, file: name }, "operator sent a file");
+    await channel.send(config.operatorJid, `Sent ${name} to ${target}.`);
     return true;
   }
 
